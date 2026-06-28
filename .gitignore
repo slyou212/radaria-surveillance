@@ -1,0 +1,6 @@
+config.json
+alertes/
+*.pyc
+__pycache__/
+yolov8n.pt
+*.pt

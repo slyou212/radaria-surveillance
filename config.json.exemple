@@ -1,0 +1,28 @@
+{
+  "cameras": [
+    {
+      "id": "cam1",
+      "nom": "Entree Magasin",
+      "url": "rtsp://UTILISATEUR:MOT_DE_PASSE@IP_CAMERA:554/cam/realmonitor?channel=1&subtype=0"
+    },
+    {
+      "id": "cam2",
+      "nom": "Rayon Principal",
+      "url": "rtsp://UTILISATEUR:MOT_DE_PASSE@IP_CAMERA:554/cam/realmonitor?channel=2&subtype=0"
+    }
+  ],
+  "twilio": {
+    "account_sid":   "VOTRE_ACCOUNT_SID_TWILIO",
+    "auth_token":    "VOTRE_AUTH_TOKEN_TWILIO",
+    "from_whatsapp": "whatsapp:+14155238886"
+  },
+  "destinataires_whatsapp": ["whatsapp:+33XXXXXXXXX"],
+  "seuils": {
+    "confiance_detection":         0.5,
+    "duree_presence_suspecte_sec": 20,
+    "mouvement_rapide_pixels":     80,
+    "frames_mouvement_rapide":     5
+  },
+  "delai_entre_alertes_sec": 60,
+  "dashboard_port": 5000
+}

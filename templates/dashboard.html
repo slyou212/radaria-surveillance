@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surveillance Magasin</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a0a; color:#eee; font-family:Arial,sans-serif; }
+.header { background:#111; padding:15px 20px; display:flex; align-items:center; gap:15px; border-bottom:2px solid #e74c3c; }
+.header h1 { color:#e74c3c; font-size:1.3em; }
+.dot { width:12px; height:12px; border-radius:50%; background:#2ecc71; animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.cameras { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:15px; padding:15px; }
+.cam { background:#111; border-radius:10px; overflow:hidden; border:1px solid #222; }
+.cam-title { background:#1a1a1a; padding:10px 15px; font-weight:bold; color:#e74c3c; font-size:.9em; }
+.cam img { width:100%; aspect-ratio:16/9; object-fit:cover; background:#000; display:block; }
+.alertes-section { margin:0 15px 15px; background:#111; border-radius:10px; border:1px solid #222; }
+.alertes-section h2 { padding:12px 15px; color:#e74c3c; border-bottom:1px solid #222; font-size:1em; }
+.alerte { padding:10px 15px; border-bottom:1px solid #1a1a1a; display:flex; gap:12px; font-size:.85em; }
+.alerte:last-child { border-bottom:none; }
+.ah { color:#888; min-width:55px; }
+.ac { color:#3498db; min-width:110px; }
+.at { color:#e74c3c; }
+#vide { padding:20px; text-align:center; color:#555; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="dot"></div>
+  <h1>SURVEILLANCE MAGASIN</h1>
+  <span id="h" style="margin-left:auto;color:#888;font-size:.85em;"></span>
+</div>
+<div class="cameras">
+  {% for cam in cameras %}
+  <div class="cam">
+    <div class="cam-title">Camera : {{ cam.nom }}</div>
+    <img src="/flux/{{ cam.id }}" alt="{{ cam.nom }}">
+  </div>
+  {% endfor %}
+</div>
+<div class="alertes-section">
+  <h2>Dernieres alertes</h2>
+  <div id="al"><div id="vide">Aucune alerte</div></div>
+</div>
+<script>
+setInterval(()=>{ document.getElementById('h').textContent=new Date().toLocaleTimeString('fr-FR'); },1000);
+setInterval(()=>{
+  fetch('/api/alertes').then(r=>r.json()).then(d=>{
+    const el=document.getElementById('al');
+    if(!d.length){el.innerHTML='<div id="vide">Aucune alerte</div>';return;}
+    el.innerHTML=d.map(a=>`<div class="alerte"><span class="ah">${a.heure}</span><span class="ac">${a.camera}</span><span class="at">${a.type.replace(/_/g,' ')}</span></div>`).join('');
+  }).catch(()=>{});
+},3000);
+</script>
+</body>
+</html>
