@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Espace Client — RadarIA</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #05050f;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #0d0d2b, #1a1a4a);
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1a1a3a;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon { font-size: 26px; }
+    .logo-text { color: #7b8cde; font-size: 20px; font-weight: 700; letter-spacing: .03em; line-height: 1.1; }
+    .logo-sub  { color: #444; font-size: 11px; }
+    .logout-btn {
+      background: transparent;
+      border: 1px solid #2a2a4a;
+      color: #666;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      text-decoration: none;
+      transition: border-color .2s, color .2s;
+    }
+    .logout-btn:hover { border-color: #444; color: #aaa; }
+
+    /* ── Layout ── */
+    .container { max-width: 920px; margin: 0 auto; padding: 28px 16px 40px; }
+    .welcome { margin-bottom: 24px; }
+    .welcome h1 { font-size: 22px; color: #fff; margin-bottom: 4px; }
+    .welcome p  { color: #555; font-size: 14px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Cards ── */
+    .card {
+      background: #0d0d2b;
+      border: 1px solid #1a1a3a;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      color: #444;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    /* ── Info rows ── */
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid #0f0f25;
+      font-size: 14px;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: #555; }
+    .info-value { color: #e0e0e0; font-weight: 500; }
+
+    /* ── Badges ── */
+    .badge {
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-green  { background: #0d3a1f; color: #4caf50; }
+    .badge-orange { background: #3a2a0d; color: #ff9800; }
+    .badge-red    { background: #3a0d0d; color: #f44336; }
+    .badge-gray   { background: #1a1a1a; color: #666; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      color: #3a3a5a;
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #1a1a3a;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    td { padding: 11px 10px; border-bottom: 1px solid #0f0f25; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.015); }
+
+    /* ── Status dot ── */
+    .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+    .dot-green { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    .dot-gray  { background: #333; }
+
+    /* ── Total bar ── */
+    .total-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 10px 0;
+      border-top: 1px solid #1a1a3a;
+      margin-top: 6px;
+      font-size: 14px;
+    }
+    .total-impayee { color: #f44336; font-weight: 700; font-size: 16px; }
+
+    /* ── Empty state ── */
+    .empty { color: #2a2a4a; text-align: center; padding: 24px; font-size: 13px; }
+
+    /* ── Expired / logged-out page ── */
+    .full-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - 64px);
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .big-icon   { font-size: 72px; margin-bottom: 24px; }
+    .big-title  { font-size: 24px; color: #fff; margin-bottom: 12px; }
+    .big-text   { color: #555; font-size: 15px; max-width: 440px; line-height: 1.7; }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      color: #2a2a4a;
+      font-size: 11px;
+      padding-top: 8px;
+    }
+    .footer a { color: #3a3a6a; text-decoration: none; }
+    .footer a:hover { color: #7b8cde; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────── -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">🎯</div>
+    <div>
+      <div class="logo-text">RadarIA</div>
+      <div class="logo-sub">Espace client</div>
+    </div>
+  </div>
+  {% if not expired and not logged_out and client %}
+  <a href="/portal/logout" class="logout-btn">Déconnexion</a>
+  {% endif %}
+</div>
+
+<!-- ── Contenu ─────────────────────────────────────────────── -->
+
+{% if logged_out %}
+<!-- Page de déconnexion -->
+<div class="container">
+  <div class="full-center">
+    <div class="big-icon">👋</div>
+    <div class="big-title">À bientôt !</div>
+    <div class="big-text">
+      Vous avez été déconnecté de votre espace client RadarIA.<br>
+      Pour vous reconnecter, demandez un nouveau lien d'accès à votre conseiller.
+    </div>
+  </div>
+</div>
+
+{% elif expired %}
+<!-- Lien expiré ou invalide -->
+<div class="container">
+  <div class="full-center">
+    <div class="big-icon">🔒</div>
+    <div class="big-title">Lien invalide ou expiré</div>
+    <div class="big-text">
+      Ce lien d'accès a expiré ou a déjà été utilisé.<br>
+      Veuillez contacter votre conseiller RadarIA pour recevoir un nouveau lien.
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- Portail client principal -->
+<div class="container">
+
+  <div class="welcome">
+    <h1>Bonjour, {{ client.nom_magasin }} 👋</h1>
+    <p>Votre espace client — abonnement, factures et surveillance</p>
+  </div>
+
+  <div class="grid-2">
+
+    <!-- Abonnement -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">📋 Abonnement</div>
+      <div class="info-row">
+        <span class="info-label">Statut</span>
+        <span>
+          {% if client.statut == 'actif' %}
+            <span class="badge badge-green">✓ Actif</span>
+          {% elif client.statut == 'suspendu' %}
+            <span class="badge badge-orange">⏸ Suspendu</span>
+          {% else %}
+            <span class="badge badge-gray">Inactif</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Mensualité</span>
+        <span class="info-value">{{ client.prix_mensuel }}€ HT / mois</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Début contrat</span>
+        <span class="info-value">{{ client.contrat_debut or '—' }}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Fin contrat</span>
+        <span class="info-value">{{ client.contrat_fin or '—' }}</span>
+      </div>
+      {% if client.contact_tel %}
+      <div class="info-row">
+        <span class="info-label">Votre conseiller</span>
+        <span class="info-value">{{ client.contact_tel }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Système de surveillance -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">💻 Votre système</div>
+      {% if installation %}
+        <div class="info-row">
+          <span class="info-label">Surveillance</span>
+          <span>
+            {% if installation.statut == 'online' %}
+              <span class="badge badge-green">
+                <span class="dot dot-green"></span>En ligne
+              </span>
+            {% else %}
+              <span class="badge badge-gray">
+                <span class="dot dot-gray"></span>Hors ligne
+              </span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Caméras actives</span>
+          <span class="info-value">
+            {{ installation.cameras_actives or 0 }} / {{ installation.nb_cameras or 0 }}
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Dernière activité</span>
+          <span class="info-value" style="font-size:12px;color:#666">
+            {% if installation.last_seen %}
+              {{ installation.last_seen[:16].replace('T', ' ') }}
+            {% else %}—{% endif %}
+          </span>
+        </div>
+      {% else %}
+        <div class="empty">Système non encore enregistré</div>
+      {% endif %}
+    </div>
+
+  </div><!-- /grid-2 -->
+
+  <!-- Factures -->
+  <div class="card">
+    <div class="card-title">💰 Mes factures</div>
+    {% if factures %}
+      {% set mois_noms = ['','Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'] %}
+      <table>
+        <thead>
+          <tr>
+            <th>Période</th>
+            <th>Montant</th>
+            <th>Statut</th>
+            <th>Émise le</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in factures %}
+          <tr>
+            <td style="color:#aaa">
+              {% if f.mois and f.mois >= 1 and f.mois <= 12 %}
+                {{ mois_noms[f.mois] }} {{ f.annee }}
+              {% else %}
+                {{ f.mois }}/{{ f.annee }}
+              {% endif %}
+            </td>
+            <td style="font-weight:600;color:#e0e0e0">{{ f.montant }}€</td>
+            <td>
+              {% if f.statut == 'payee' %}
+                <span class="badge badge-green">✓ Payée</span>
+              {% else %}
+                <span class="badge badge-red">⚠ Impayée</span>
+              {% endif %}
+            </td>
+            <td style="color:#444;font-size:12px">{{ f.date_emission or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <!-- Total impayé -->
+      {% set total = namespace(val=0) %}
+      {% for f in factures %}
+        {% if f.statut != 'payee' %}
+          {% set total.val = total.val + f.montant %}
+        {% endif %}
+      {% endfor %}
+      {% if total.val > 0 %}
+      <div class="total-bar">
+        <span style="color:#555;font-size:13px">Total impayé</span>
+        <span class="total-impayee">{{ "%.2f"|format(total.val) }}€</span>
+      </div>
+      {% endif %}
+
+    {% else %}
+      <div class="empty">Aucune facture pour le moment</div>
+    {% endif %}
+  </div>
+
+  <!-- Contrats -->
+  {% if contrats %}
+  <div class="card">
+    <div class="card-title">📄 Mon contrat</div>
+    {% for c in contrats %}
+    <div style="border:1px solid #1a1a3a;border-radius:10px;padding:16px;margin-bottom:12px;background:#08081e">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-family:monospace;color:#7b8cde;font-size:13px;font-weight:600">{{ c.numero }}</div>
+          <div style="color:#444;font-size:11px;margin-top:3px">Émis le {{ c.date_creation[:10] if c.date_creation else '—' }}</div>
+        </div>
+        <div>
+          {% if c.statut == 'signe' %}
+            <span class="badge badge-green">✔ Signé le {{ c.date_signature[:10] if c.date_signature else '' }}</span>
+          {% else %}
+            <span class="badge badge-orange">⏳ En attente de signature</span>
+          {% endif %}
+        </div>
+      </div>
+      {% if c.statut != 'signe' %}
+      <div style="margin-top:14px;border-top:1px solid #1a1a3a;padding-top:14px">
+        <p style="color:#888;font-size:13px;margin-bottom:12px">
+          Veuillez lire et signer électroniquement votre contrat de services RadarIA.
+          Votre signature engage les deux parties (valeur légale eIDAS).
+        </p>
+        <form method="post" action="/portal/contrat/{{ c.id }}/signer"
+              onsubmit="return confirm('Je confirme avoir lu et accepté les termes du contrat RadarIA.')">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input name="nom_signataire"
+                   placeholder="Votre nom complet (prénom nom)"
+                   required
+                   style="flex:1;min-width:200px;background:#0a0a1a;border:1px solid #2a2a5a;
+                          border-radius:8px;padding:10px 14px;color:#fff;font-size:13px">
+            <button type="submit"
+                    style="background:linear-gradient(135deg,#2e7d32,#43a047);color:#fff;
+                           border:none;border-radius:8px;padding:10px 22px;font-size:13px;
+                           font-weight:600;cursor:pointer;white-space:nowrap">
+              ✍ Je signe ce contrat
+            </button>
+          </div>
+          <p style="color:#333;font-size:11px;margin-top:8px">
+            En cliquant sur "Je signe", vous apposez une signature électronique ayant valeur légale (art. 1366 Code civil / eIDAS).
+          </p>
+        </form>
+      </div>
+      {% else %}
+      <div style="margin-top:10px;color:#555;font-size:12px">
+        Signé par : <span style="color:#4caf50">{{ c.signe_par }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Alertes récentes -->
+  <div class="card">
+    <div class="card-title">🚨 Dernières alertes détectées</div>
+    {% if alertes %}
+      {% set type_labels = {
+        'vol': '🛍 Vol',
+        'Vol': '🛍 Vol',
+        'intrusion': '🚪 Intrusion',
+        'Intrusion': '🚪 Intrusion',
+        'mouvement': '👤 Mouvement',
+        'Mouvement': '👤 Mouvement'
+      } %}
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Heure</th>
+            <th>Type</th>
+            <th>Caméra</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in alertes %}
+          <tr>
+            <td style="font-family:monospace;font-size:12px;color:#555">{{ a.date }}</td>
+            <td style="font-family:monospace;font-size:12px;color:#555">{{ a.heure }}</td>
+            <td><span class="badge badge-red">{{ type_labels.get(a.type, a.type) }}</span></td>
+            <td style="color:#666;font-size:13px">{{ a.camera }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">Aucune alerte récente</div>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    RadarIA — Surveillance par intelligence artificielle<br>
+    Contact : <a href="mailto:rachid_sliman@yahoo.fr">rachid_sliman@yahoo.fr</a>
+  </div>
+
+</div><!-- /container -->
+{% endif %}
+
+</body>
+</html>

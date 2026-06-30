@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>RadarIA — Agents PC</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07071a;color:#e0e0e0;font-family:'Segoe UI',Arial,sans-serif;min-height:100vh}
+.topbar{background:#0d0d2b;border-bottom:1px solid #1a1a3a;padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:17px;color:#7b8cde;font-weight:700;letter-spacing:.04em}
+.topbar .nav a{color:#555;text-decoration:none;margin-left:20px;font-size:13px}
+.topbar .nav a:hover{color:#7b8cde}
+.content{max-width:1300px;margin:0 auto;padding:28px}
+.section-title{font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;margin-top:28px}
+
+/* Grid agents */
+.agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:32px}
+.agent-card{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;padding:18px;position:relative}
+.agent-card.online {border-left:4px solid #4ade80}
+.agent-card.warn   {border-left:4px solid #fbbf24}
+.agent-card.offline{border-left:4px solid #f87171}
+.agent-name{font-weight:700;font-size:15px;color:#e0e0e0;margin-bottom:2px}
+.agent-host{font-size:11px;color:#555;margin-bottom:12px;font-family:monospace}
+.agent-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{background:#07071a;border-radius:8px;padding:8px 10px}
+.stat-label{font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.04em}
+.stat-value{font-size:14px;font-weight:600;color:#e0e0e0;margin-top:2px}
+.stat-value.ok {color:#4ade80}
+.stat-value.ko {color:#f87171}
+.stat-value.warn{color:#fbbf24}
+.badge-statut{position:absolute;top:14px;right:14px;font-size:10px;padding:3px 10px;border-radius:10px;font-weight:700}
+.badge-statut.online {background:#1e3a1e;color:#4ade80}
+.badge-statut.warn   {background:#3a3000;color:#fbbf24}
+.badge-statut.offline{background:#3a1e1e;color:#f87171}
+.last-seen{font-size:11px;color:#444;margin-top:12px}
+.btn-cmd{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.btn{font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #2a2a5a;background:#0d0d2b;color:#7b8cde;cursor:pointer}
+.btn:hover{background:#1a1a4a}
+.btn-danger{border-color:#4a1a1a;color:#f87171}
+.btn-danger:hover{background:#2a0a0a}
+
+/* Incidents */
+.incidents-list{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;overflow:hidden}
+.incident-row{padding:14px 18px;border-bottom:1px solid #0a0a1a;display:flex;gap:14px;align-items:flex-start}
+.incident-row:last-child{border-bottom:none}
+.inc-priorite{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;white-space:nowrap;margin-top:2px}
+.inc-priorite.critique{background:#4a0a0a;color:#f87171}
+.inc-priorite.haute   {background:#3a1a0a;color:#fb923c}
+.inc-priorite.moyenne {background:#3a3000;color:#fbbf24}
+.inc-priorite.basse   {background:#1a2a1a;color:#86efac}
+.inc-body{flex:1}
+.inc-magasin{font-size:12px;color:#7b8cde;font-weight:600;margin-bottom:3px}
+.inc-desc{font-size:13px;color:#ccc}
+.inc-fix{font-size:11px;color:#555;margin-top:4px}
+.inc-date{font-size:10px;color:#444;white-space:nowrap}
+.empty{text-align:center;padding:40px;color:#333;font-size:14px}
+
+/* Envoyer commande */
+.cmd-panel{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;padding:20px;margin-top:28px}
+.cmd-panel h3{font-size:13px;color:#7b8cde;margin-bottom:14px}
+.cmd-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.cmd-form select, .cmd-form input{background:#07071a;border:1px solid #1a1a3a;color:#e0e0e0;padding:8px 12px;border-radius:8px;font-size:13px}
+.cmd-form select{min-width:200px}
+.btn-envoyer{background:#1a1a4a;border:1px solid #3a3a7a;color:#7b8cde;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
+.btn-envoyer:hover{background:#2a2a6a}
+.counter{font-size:11px;color:#444;text-align:right;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>🛡️ RadarIA — Supervision Agents PC</h1>
+  <div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/agents" style="color:#7b8cde">Agents</a>
+    <a href="/logout">Déconnexion</a>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- Agents -->
+  <div class="section-title">PC clients connectés ({{ agents|length }})</div>
+  {% if agents %}
+  <div class="agents-grid">
+    {% for a in agents %}
+    <div class="agent-card {{ a.statut_visuel }}">
+      <span class="badge-statut {{ a.statut_visuel }}">
+        {% if a.statut_visuel == 'online' %}● EN LIGNE
+        {% elif a.statut_visuel == 'warn' %}⚠ INACTIF
+        {% else %}✕ HORS LIGNE{% endif %}
+      </span>
+      <div class="agent-name">{{ a.nom_magasin or '—' }}</div>
+      <div class="agent-host">{{ a.hostname }}</div>
+      <div class="agent-stats">
+        <div class="stat">
+          <div class="stat-label">Surveillance</div>
+          <div class="stat-value {{ 'ok' if a.surveillance_active else 'ko' }}">
+            {{ 'Active' if a.surveillance_active else 'Arrêtée' }}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Caméras</div>
+          <div class="stat-value {{ 'ok' if a.cameras_ok == a.cameras_total and a.cameras_total > 0 else 'ko' }}">
+            {{ a.cameras_ok }}/{{ a.cameras_total }}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Disk libre</div>
+          <div class="stat-value {{ 'warn' if a.disk_libre_gb and a.disk_libre_gb < 10 else 'ok' }}">
+            {{ '%.1f Go'|format(a.disk_libre_gb) if a.disk_libre_gb else '—' }}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Latence</div>
+          <div class="stat-value {{ 'warn' if a.backoffice_ms and a.backoffice_ms > 1000 else 'ok' }}">
+            {{ '%d ms'|format(a.backoffice_ms) if a.backoffice_ms else '—' }}
+          </div>
+        </div>
+      </div>
+      <div class="last-seen">Dernière activité : {{ a.last_seen_str }}</div>
+      <div class="btn-cmd">
+        <button class="btn" onclick="envoyerCmd('{{ a.license_key }}','redemarrer_surveillance')">↺ Relancer</button>
+        <button class="btn" onclick="envoyerCmd('{{ a.license_key }}','diagnostic')">🔍 Diagnostic</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="incidents-list"><div class="empty">Aucun agent connecté — le Gardien n'a pas encore envoyé de statut.</div></div>
+  {% endif %}
+
+  <!-- Incidents -->
+  <div class="section-title">Incidents récents {% if nb_incidents > 0 %}<span style="background:#3a1e1e;color:#f87171;padding:2px 8px;border-radius:8px;font-size:11px">{{ nb_incidents }} non lus</span>{% endif %}</div>
+  <div class="incidents-list">
+    {% if incidents %}
+      {% for i in incidents %}
+      <div class="incident-row">
+        <div>
+          <div class="inc-priorite {{ i.priorite }}">{{ i.priorite|upper }}</div>
+        </div>
+        <div class="inc-body">
+          <div class="inc-magasin">{{ i.nom_magasin or i.license_key[:8]+'...' }} — {{ i.hostname }}</div>
+          <div class="inc-desc">{{ i.description }}</div>
+          {% if i.diagnostic %}<div class="inc-fix">🤖 {{ i.diagnostic }}</div>{% endif %}
+          {% if i.fix_applique %}<div class="inc-fix" style="color:#4ade80">✓ {{ i.fix_applique }}</div>{% endif %}
+        </div>
+        <div class="inc-date">{{ i.created_at_str }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">Aucun incident — tout va bien.</div>
+    {% endif %}
+  </div>
+
+  <!-- Envoyer commande -->
+  <div class="cmd-panel">
+    <h3>Envoyer une commande à distance</h3>
+    <form class="cmd-form" action="/api/agent/commande/envoyer" method="POST" id="formCmd">
+      <select name="license_key" required>
+        <option value="">Choisir un client...</option>
+        {% for c in clients_list %}
+        <option value="{{ c.license_key }}">{{ c.nom_magasin }}</option>
+        {% endfor %}
+      </select>
+      <select name="action" required>
+        <option value="redemarrer_surveillance">↺ Relancer surveillance</option>
+        <option value="diagnostic">🔍 Diagnostic complet</option>
+        <option value="mettre_a_jour">⬆ Mettre à jour surveillance.py</option>
+      </select>
+      <button type="submit" class="btn-envoyer">Envoyer</button>
+    </form>
+  </div>
+
+  <div class="counter">Actualisation automatique toutes les 30 secondes</div>
+</div>
+
+<script>
+function envoyerCmd(lk, action) {
+  if (!confirm('Envoyer "' + action + '" au Gardien ?')) return;
+  const fd = new FormData();
+  fd.append('license_key', lk);
+  fd.append('action', action);
+  fetch('/api/agent/commande/envoyer', {method:'POST', body:fd})
+    .then(r=>r.json())
+    .then(d=>alert(d.message || (d.ok ? 'Commande envoyée' : 'Erreur')));
+}
+document.getElementById('formCmd').addEventListener('submit', function(e){
+  e.preventDefault();
+  const fd = new FormData(this);
+  fetch('/api/agent/commande/envoyer', {method:'POST', body:fd})
+    .then(r=>r.json())
+    .then(d=>alert(d.message || (d.ok ? 'Commande envoyée' : 'Erreur')));
+});
+</script>
+</body>
+</html>

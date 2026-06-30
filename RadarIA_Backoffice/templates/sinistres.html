@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Sinistres — RadarIA{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">⚠️ <span>Sinistres & Tickets</span></div>
+  <a href="/" class="btn btn-secondary">← Dashboard</a>
+</div>
+
+<!-- Filtres -->
+<div class="card" style="margin-bottom:16px;padding:14px 16px">
+  <form method="get" action="/sinistres" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <select name="statut" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:7px 12px;color:#fff;font-size:13px">
+      <option value="">Tous les statuts</option>
+      <option value="ouvert" {% if filtre_statut=='ouvert' %}selected{% endif %}>Ouvert</option>
+      <option value="en_cours" {% if filtre_statut=='en_cours' %}selected{% endif %}>En cours</option>
+      <option value="resolu" {% if filtre_statut=='resolu' %}selected{% endif %}>Résolu</option>
+      <option value="ferme" {% if filtre_statut=='ferme' %}selected{% endif %}>Fermé</option>
+    </select>
+    <select name="origine" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:7px 12px;color:#fff;font-size:13px">
+      <option value="">Toutes origines</option>
+      <option value="client" {% if filtre_origine=='client' %}selected{% endif %}>📱 Client</option>
+      <option value="ia"     {% if filtre_origine=='ia' %}selected{% endif %}>🤖 IA</option>
+      <option value="admin"  {% if filtre_origine=='admin' %}selected{% endif %}>👤 Admin</option>
+    </select>
+    <select name="type" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:7px 12px;color:#fff;font-size:13px">
+      <option value="">Tous les types</option>
+      {% for t in types_sinistre %}
+      <option value="{{ t }}" {% if filtre_type==t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary btn-sm">Filtrer</button>
+    <a href="/sinistres" style="color:#666;font-size:13px;text-decoration:none;padding:7px 12px">Réinitialiser</a>
+  </form>
+</div>
+
+<!-- Tableau sinistres -->
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Client</th>
+        <th>Type</th>
+        <th>Origine</th>
+        <th>Date</th>
+        <th>Statut</th>
+        <th>Description</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sinistres %}
+      <tr>
+        <td style="font-family:monospace;color:#555;font-size:12px">#{{ s.id }}</td>
+        <td>
+          <a href="/client/{{ s.client_id }}#sinistres" style="color:#7b8cde;text-decoration:none;font-weight:600">{{ s.nom_magasin }}</a>
+        </td>
+        <td style="font-weight:600;color:#e0e0e0">{{ s.type }}</td>
+        <td>
+          {% if s.origine == 'client' %}<span class="badge" style="background:#1a2a4a;color:#7b8cde">📱 Client</span>
+          {% elif s.origine == 'ia' %}<span class="badge" style="background:#2a1a4a;color:#c084fc">🤖 IA</span>
+          {% else %}<span class="badge" style="background:#2a2a1a;color:#fbbf24">👤 Admin</span>{% endif %}
+        </td>
+        <td style="font-size:12px;color:#666">{{ s.date_declaration }}</td>
+        <td>
+          <span style="font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;
+            {% if s.statut=='ouvert' %}background:#3a2500;color:#f59e0b
+            {% elif s.statut=='en_cours' %}background:#1a1a4a;color:#7b8cde
+            {% elif s.statut=='resolu' %}background:#1a3a1a;color:#4ade80
+            {% else %}background:#2a2a2a;color:#888{% endif %}">
+            {{ s.statut | upper }}
+          </span>
+        </td>
+        <td style="font-size:12px;color:#777;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.description or '—' }}</td>
+        <td>
+          <form method="post" action="/sinistre/{{ s.id }}/statut" style="display:inline-flex;gap:4px">
+            <select name="statut" style="background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:3px 6px;color:#fff;font-size:11px">
+              <option value="ouvert"   {% if s.statut=='ouvert' %}selected{% endif %}>Ouvert</option>
+              <option value="en_cours" {% if s.statut=='en_cours' %}selected{% endif %}>En cours</option>
+              <option value="resolu"   {% if s.statut=='resolu' %}selected{% endif %}>Résolu</option>
+              <option value="ferme"    {% if s.statut=='ferme' %}selected{% endif %}>Fermé</option>
+            </select>
+            <input type="hidden" name="redirect" value="/sinistres{% if request.query_string %}?{{ request.query_string.decode() }}{% endif %}">
+            <button type="submit" class="btn btn-secondary btn-sm">✓</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:#555;padding:40px">Aucun sinistre trouvé</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

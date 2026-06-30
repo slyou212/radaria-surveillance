@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}{{ client.nom_magasin }} — RadarIA{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">🏪 <span>{{ client.nom_magasin }}</span></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a href="/client/{{ client.id }}/edit" class="btn btn-secondary">✏️ Modifier</a>
+    <form method="post" action="/client/{{ client.id }}/suspension" style="display:inline">
+      <button type="submit" class="btn {{ 'btn-warning' if client.statut == 'actif' else 'btn-success' }}">
+        {{ '⏸ Suspendre' if client.statut == 'actif' else '▶ Réactiver' }}
+      </button>
+    </form>
+    {% if client.contact_email %}
+    <form method="post" action="/client/{{ client.id }}/envoyer-acces" style="display:inline">
+      <button type="submit" class="btn btn-primary" title="Envoyer un lien d'accès portail à {{ client.contact_email }}">
+        📧 Accès portail
+      </button>
+    </form>
+    {% endif %}
+    <a href="/" class="btn btn-secondary">← Retour</a>
+  </div>
+</div>
+
+<!-- Infos client -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+  <div class="card">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Informations</div>
+    <table>
+      <tr><td style="color:#666;width:140px">Statut</td><td>
+        {% if client.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+        {% elif client.statut == 'suspendu' %}<span class="badge badge-orange">Suspendu</span>
+        {% else %}<span class="badge badge-gray">Inactif</span>{% endif %}
+      </td></tr>
+      <tr><td style="color:#666">Contact</td><td>{{ client.contact_nom or '—' }}</td></tr>
+      <tr><td style="color:#666">Téléphone</td><td>{{ client.contact_tel or '—' }}</td></tr>
+      <tr><td style="color:#666">Email</td><td>{{ client.contact_email or '—' }}</td></tr>
+      <tr><td style="color:#666">Adresse</td><td>{{ client.adresse or '—' }}</td></tr>
+      <tr><td style="color:#666">SIRET</td><td style="font-family:monospace">{{ client.siret or '—' }}</td></tr>
+      <tr><td style="color:#666">Username</td><td style="font-family:monospace">{{ client.username }}</td></tr>
+      <tr><td style="color:#666">License Key</td><td style="font-family:monospace;font-size:11px;color:#e74c3c">{{ client.license_key }}</td></tr>
+      <tr><td style="color:#666">Prix mensuel</td><td>{{ client.prix_mensuel }}€</td></tr>
+      <tr><td style="color:#666">Contrat</td><td>{{ client.contrat_debut or '?' }} → {{ client.contrat_fin or '?' }}</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Installation PC</div>
+    {% if installation %}
+    <table>
+      <tr><td style="color:#666;width:140px">Statut</td><td>
+        {% if installation.statut == 'online' %}<span class="badge badge-green">🟢 En ligne</span>
+        {% else %}<span class="badge badge-gray">⚫ Hors ligne</span>{% endif %}
+      </td></tr>
+      <tr><td style="color:#666">Hostname</td><td>{{ installation.pc_hostname or '—' }}</td></tr>
+      <tr><td style="color:#666">IP locale</td><td style="font-family:monospace">{{ installation.ip_locale or '—' }}</td></tr>
+      <tr><td style="color:#666">IP publique</td><td style="font-family:monospace">{{ installation.ip_publique or '—' }}</td></tr>
+      <tr><td style="color:#666">Caméras</td><td>{{ installation.cameras_actives }}/{{ installation.nb_cameras }}</td></tr>
+      <tr><td style="color:#666">Dernière vue</td><td style="font-size:12px">{{ installation.last_seen[:16].replace('T',' ') if installation.last_seen else '—' }}</td></tr>
+    </table>
+    {% else %}
+    <div style="color:#555;text-align:center;padding:20px">Aucune installation enregistrée</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Snapshots -->
+{% if snapshots %}
+<div class="card" style="margin-bottom:24px">
+  <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">📷 Snapshots caméras</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">
+    {% for s in snapshots %}
+    <img src="/snapshots/{{ client_id }}/{{ s }}" style="width:180px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #1a1a3a">
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Alertes -->
+<div class="card" style="margin-bottom:24px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">🚨 Alertes récentes</div>
+    {% if feedback_stats.total > 0 %}
+    <div style="display:flex;gap:8px;align-items:center">
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#1e3a1e;color:#4ade80;font-weight:600">
+        ✅ Vol confirmé : {{ feedback_stats.vol }}
+        {% if feedback_stats.total > 0 %}({{ (feedback_stats.vol / feedback_stats.total * 100)|int }}%){% endif %}
+      </span>
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#3a1e1e;color:#f87171;font-weight:600">
+        ❌ Faux positif : {{ feedback_stats.faux }}
+        {% if feedback_stats.total > 0 %}({{ (feedback_stats.faux / feedback_stats.total * 100)|int }}%){% endif %}
+      </span>
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#2a2a2a;color:#888;font-weight:600">
+        ⬜ Sans retour : {{ feedback_stats.aucun }}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+  {% if alertes %}
+  <table>
+    <thead><tr><th>Date</th><th>Heure</th><th>Type</th><th>Caméra</th><th>Vidéo</th><th>Validation client</th></tr></thead>
+    <tbody>
+      {% for a in alertes %}
+      <tr>
+        <td style="font-family:monospace;font-size:12px">{{ a.date }}</td>
+        <td style="font-family:monospace;font-size:12px">{{ a.heure }}</td>
+        <td><span class="badge badge-red">{{ a.type }}</span></td>
+        <td style="color:#aaa">{{ a.camera }}</td>
+        <td>{% if a.video_url %}<a href="{{ a.video_url }}" target="_blank" style="background:#1a1a3a;color:#7b8cde;border:1px solid #2a2a5a;border-radius:6px;padding:3px 10px;font-size:11px;text-decoration:none;white-space:nowrap">▶ Vidéo</a>{% else %}<span style="color:#333;font-size:11px">—</span>{% endif %}</td>
+        <td>
+          {% if a._fb_type == 'vol' %}
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#1e3a1e;color:#4ade80;font-weight:600">✅ Vol confirmé</span>
+          {% elif a._fb_type == 'faux' %}
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#3a1e1e;color:#f87171;font-weight:600">❌ Faux positif</span>
+          {% else %}
+          <span style="color:#444;font-size:11px">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:#555;text-align:center;padding:20px">Aucune alerte</div>
+  {% endif %}
+</div>
+
+<!-- Interventions -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+  <div class="card">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">🔧 Interventions</div>
+    {% if interventions %}
+    <table>
+      <thead><tr><th>Date</th><th>Type</th><th>Durée</th></tr></thead>
+      <tbody>
+        {% for i in interventions %}
+        <tr>
+          <td style="font-size:12px;color:#666">{{ i.date }}</td>
+          <td>{{ i.type }}</td>
+          <td style="color:#666">{{ i.duree_min }}min</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="color:#555;font-size:13px">Aucune intervention</div>
+    {% endif %}
+    <form method="post" action="/client/{{ client.id }}/intervention" style="margin-top:16px;border-top:1px solid #1a1a3a;padding-top:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <select name="type" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+          <option>Installation</option><option>Maintenance</option><option>Support</option><option>Dépannage</option>
+        </select>
+        <input name="duree_min" type="number" placeholder="Durée (min)" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <textarea name="description" placeholder="Description..." rows="2" style="grid-column:1/-1;background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px;resize:vertical"></textarea>
+        <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/-1">+ Ajouter intervention</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Factures -->
+  <div class="card">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">💰 Factures</div>
+    {% if factures %}
+    <table>
+      <thead><tr><th>Mois</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
+      <tbody>
+        {% for f in factures %}
+        <tr>
+          <td style="font-size:12px">{{ f.mois }}/{{ f.annee }}</td>
+          <td>{{ f.montant }}€</td>
+          <td>
+            {% if f.statut == 'payee' %}<span class="badge badge-green">Payée</span>
+            {% else %}<span class="badge badge-red">Impayée</span>{% endif %}
+          </td>
+          <td>
+            {% if f.statut != 'payee' %}
+            <form method="post" action="/facture/{{ f.id }}/payer" style="display:inline">
+              <button type="submit" class="btn btn-success btn-sm">✓</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="color:#555;font-size:13px">Aucune facture</div>
+    {% endif %}
+    <form method="post" action="/client/{{ client.id }}/facture" style="margin-top:16px;border-top:1px solid #1a1a3a;padding-top:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <input name="mois" type="number" placeholder="Mois" min="1" max="12" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <input name="annee" type="number" placeholder="Année" value="2026" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <input name="montant" type="number" step="0.01" placeholder="Montant €" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/-1">+ Ajouter facture</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Contrats -->
+<div class="card" style="margin-bottom:24px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">📄 Contrats</div>
+    <form method="post" action="/client/{{ client.id }}/contrat/generer" style="display:inline">
+      <button type="submit" class="btn btn-primary btn-sm">+ Générer contrat</button>
+    </form>
+  </div>
+  {% if contrats %}
+  <table>
+    <thead><tr><th>Numéro</th><th>Créé le</th><th>Envoyé</th><th>Statut</th><th>Signé par</th><th></th></tr></thead>
+    <tbody>
+      {% for c in contrats %}
+      <tr>
+        <td style="font-family:monospace;font-size:12px;color:#7b8cde">{{ c.numero }}</td>
+        <td style="font-size:12px;color:#666">{{ c.date_creation[:10] if c.date_creation else '—' }}</td>
+        <td style="font-size:12px;color:#666">{{ c.date_envoi[:10] if c.date_envoi else '—' }}</td>
+        <td>
+          {% if c.statut == 'signe' %}<span class="badge badge-green">✔ Signé</span>
+          {% elif c.statut == 'envoye' %}<span class="badge badge-orange">📤 Envoyé</span>
+          {% elif c.statut == 'genere' %}<span class="badge badge-gray">📄 Généré</span>
+          {% else %}<span class="badge badge-gray">Brouillon</span>{% endif %}
+        </td>
+        <td style="font-size:12px;color:#aaa">{{ c.signe_par or '—' }}</td>
+        <td style="white-space:nowrap">
+          <a href="/contrat/{{ c.id }}/pdf" class="btn btn-secondary btn-sm" title="Télécharger PDF">⬇ PDF</a>
+          {% if c.statut != 'signe' and client.contact_email %}
+          <form method="post" action="/contrat/{{ c.id }}/envoyer-client" style="display:inline">
+            <button type="submit" class="btn btn-primary btn-sm" title="Envoyer au client pour signature">📧 Envoyer</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:#555;text-align:center;padding:20px;font-size:13px">Aucun contrat — cliquez sur "+ Générer contrat"</div>
+  {% endif %}
+</div>
+
+<!-- Sinistres -->
+<div class="card" id="sinistres" style="margin-bottom:24px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">⚠️ Sinistres & Tickets</div>
+    <a href="/sinistres?client_id={{ client.id }}" style="color:#7b8cde;font-size:12px;text-decoration:none">Voir tout →</a>
+  </div>
+
+  {% if sinistres %}
+  <table style="margin-bottom:16px">
+    <thead><tr><th>Type</th><th>Origine</th><th>Date</th><th>Statut</th><th>Description</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for s in sinistres %}
+      <tr>
+        <td style="font-weight:600">{{ s.type }}</td>
+        <td>
+          {% if s.origine == 'client' %}<span class="badge" style="background:#1a2a4a;color:#7b8cde">📱 Client</span>
+          {% elif s.origine == 'ia' %}<span class="badge" style="background:#2a1a4a;color:#c084fc">🤖 IA</span>
+          {% else %}<span class="badge" style="background:#2a2a1a;color:#fbbf24">👤 Admin</span>{% endif %}
+        </td>
+        <td style="font-size:12px;color:#666">{{ s.date_declaration }}</td>
+        <td>
+          <span style="font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;
+            {% if s.statut=='ouvert' %}background:#3a2500;color:#f59e0b
+            {% elif s.statut=='en_cours' %}background:#1a1a4a;color:#7b8cde
+            {% elif s.statut=='resolu' %}background:#1a3a1a;color:#4ade80
+            {% else %}background:#2a2a2a;color:#888{% endif %}">
+            {{ s.statut | upper }}
+          </span>
+        </td>
+        <td style="font-size:12px;color:#777;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.description or '—' }}</td>
+        <td>
+          <form method="post" action="/sinistre/{{ s.id }}/statut" style="display:inline-flex;gap:4px">
+            <select name="statut" style="background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:3px 6px;color:#fff;font-size:11px">
+              <option value="ouvert" {% if s.statut=='ouvert' %}selected{% endif %}>Ouvert</option>
+              <option value="en_cours" {% if s.statut=='en_cours' %}selected{% endif %}>En cours</option>
+              <option value="resolu" {% if s.statut=='resolu' %}selected{% endif %}>Résolu</option>
+              <option value="ferme" {% if s.statut=='ferme' %}selected{% endif %}>Fermé</option>
+            </select>
+            <button type="submit" class="btn btn-secondary btn-sm">✓</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="color:#555;font-size:13px;margin-bottom:16px">Aucun sinistre enregistré</div>
+  {% endif %}
+
+  <!-- Formulaire nouveau sinistre (admin) -->
+  <form method="post" action="/client/{{ client.id }}/sinistre" style="border-top:1px solid #1a1a3a;padding-top:14px">
+    <div style="color:#666;font-size:11px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Créer un ticket admin</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <select name="type" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <option>Vol</option><option>Vandalisme</option><option>Intrusion</option>
+        <option>Incendie</option><option>Degat des eaux</option><option>Accident</option><option>Autre</option>
+      </select>
+      <select name="statut" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <option value="ouvert">Ouvert</option>
+        <option value="en_cours">En cours</option>
+      </select>
+      <textarea name="description" placeholder="Description du sinistre..." rows="2"
+        style="grid-column:1/-1;background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px;resize:vertical"></textarea>
+      <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/-1">+ Créer ticket</button>
+    </div>
+  </form>
+</div>
+
+<!-- Notes -->
+{% if client.notes %}
+<div class="card" style="margin-bottom:24px">
+  <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">📝 Notes internes</div>
+  <div style="color:#aaa;font-size:14px;white-space:pre-wrap">{{ client.notes }}</div>
+</div>
+{% endif %}
+{% endblock %}

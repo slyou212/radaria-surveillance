@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    {% if action == 'nouveau' %}➕ Nouveau client{% else %}✏️ Modifier — <span>{{ client.nom_magasin }}</span>{% endif %}
+  </div>
+  <a href="/" class="btn btn-secondary">← Retour</a>
+</div>
+
+{% if action == 'nouveau' %}
+<!-- RECHERCHE SIRET -->
+<div class="form-card" style="margin-bottom:16px">
+  <div style="color:#888;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">🔍 Recherche entreprise par SIRET</div>
+  <div style="display:flex;gap:10px;align-items:flex-end">
+    <div style="flex:1">
+      <label style="color:#aaa;font-size:13px;margin-bottom:6px;display:block">Numéro SIRET (14 chiffres)</label>
+      <input type="text" id="siret_input" placeholder="ex: 83814361700034" maxlength="14"
+             style="width:100%;background:#1a1a2e;border:1px solid #333;border-radius:10px;
+                    padding:12px 16px;color:#fff;font-size:15px;box-sizing:border-box"
+             oninput="this.value=this.value.replace(/\D/g,'')">
+    </div>
+    <button type="button" onclick="rechercherSiret()"
+            style="background:#e74c3c;color:#fff;border:none;border-radius:10px;
+                   padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap">
+      Rechercher
+    </button>
+  </div>
+  <div id="siret_result" style="margin-top:12px;display:none"></div>
+</div>
+{% endif %}
+
+<div class="form-card">
+  <form method="post" id="clientForm">
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Nom du magasin *</label>
+        <input type="text" name="nom_magasin" id="f_nom_magasin" value="{{ client.nom_magasin if client else '' }}" required>
+      </div>
+      <div class="form-group">
+        <label>Nom du contact</label>
+        <input type="text" name="contact_nom" id="f_contact_nom" value="{{ client.contact_nom if client else '' }}">
+      </div>
+      <div class="form-group">
+        <label>Téléphone</label>
+        <input type="tel" name="contact_tel" id="f_contact_tel" value="{{ client.contact_tel if client else '' }}">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" name="contact_email" id="f_contact_email" value="{{ client.contact_email if client else '' }}">
+      </div>
+      <div class="form-group">
+        <label>Prix mensuel (€)</label>
+        <input type="number" step="0.01" name="prix_mensuel" id="f_prix_mensuel" value="{{ client.prix_mensuel if client else '0' }}">
+      </div>
+      <div class="form-group full">
+        <label>Adresse</label>
+        <input type="text" name="adresse" id="f_adresse" value="{{ client.adresse if client else '' }}">
+      </div>
+
+      <!-- Champ SIRET caché pour stocker la valeur -->
+      <input type="hidden" name="siret" id="f_siret" value="{{ client.siret if client else '' }}">
+      <input type="hidden" name="forme_juridique" id="f_forme_juridique" value="">
+      <input type="hidden" name="activite" id="f_activite" value="">
+
+      <div style="grid-column:1/-1;border-top:1px solid #1a1a2e;padding-top:16px;margin-top:4px">
+        <div style="color:#888;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Accès application</div>
+      </div>
+
+      {% if action == 'nouveau' %}
+      <div class="form-group">
+        <label>Identifiant (username) *</label>
+        <input type="text" name="username" id="f_username" required placeholder="ex: magasin_paris">
+      </div>
+      <div class="form-group">
+        <label>Mot de passe *</label>
+        <input type="password" name="password" required>
+      </div>
+      {% else %}
+      <div class="form-group">
+        <label>Statut du compte</label>
+        <select name="statut">
+          <option value="actif" {{ 'selected' if client.statut=='actif' else '' }}>Actif</option>
+          <option value="suspendu" {{ 'selected' if client.statut=='suspendu' else '' }}>Suspendu</option>
+          <option value="inactif" {{ 'selected' if client.statut=='inactif' else '' }}>Inactif</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Nouveau mot de passe (laisser vide = inchangé)</label>
+        <input type="password" name="new_password" placeholder="(optionnel)">
+      </div>
+      {% endif %}
+
+      <div style="grid-column:1/-1;border-top:1px solid #1a1a2e;padding-top:16px;margin-top:4px">
+        <div style="color:#888;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Contrat</div>
+      </div>
+      <div class="form-group">
+        <label>Début contrat</label>
+        <input type="date" name="contrat_debut" value="{{ client.contrat_debut if client else '' }}">
+      </div>
+      <div class="form-group">
+        <label>Fin contrat</label>
+        <input type="date" name="contrat_fin" value="{{ client.contrat_fin if client else '' }}">
+      </div>
+      <div class="form-group full">
+        <label>Notes internes</label>
+        <textarea name="notes">{{ client.notes if client else '' }}</textarea>
+      </div>
+
+      <div style="grid-column:1/-1;border-top:1px solid #1a1a2e;padding-top:16px;margin-top:4px">
+        <div style="color:#888;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📷 Configuration caméras (JSON)</div>
+        <div style="color:#555;font-size:12px;margin-bottom:12px">Stockée dans le backoffice — le PC client la télécharge automatiquement au démarrage via la license key.</div>
+      </div>
+      <div class="form-group full">
+        <label>Config JSON (caméras + seuils)</label>
+        <textarea name="config_json" id="config_json" rows="10" style="font-family:monospace;font-size:12px">{{ client.config_json if client else '' }}</textarea>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button type="button" onclick="genererConfigDefaut()" style="background:#1a3a2a;color:#27ae60;border:1px solid #27ae60;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">⚡ Générer config vide</button>
+          <button type="button" onclick="validerJson()" style="background:#1a1a3a;color:#3498db;border:1px solid #3498db;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">✅ Valider JSON</button>
+        </div>
+        <div id="json_status" style="margin-top:6px;font-size:12px"></div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        {% if action == 'nouveau' %}✅ Créer le client{% else %}💾 Enregistrer{% endif %}
+      </button>
+      <a href="/" class="btn btn-secondary">Annuler</a>
+    </div>
+  </form>
+</div>
+
+<script>
+function genererConfigDefaut() {
+  const cfg = {
+    cameras: [
+      {"id": "cam1", "nom": "Caméra 1", "url": "rtsp://admin:MOT_DE_PASSE@IP_NVR:554/cam/realmonitor?channel=1&subtype=1"},
+      {"id": "cam2", "nom": "Caméra 2", "url": "rtsp://admin:MOT_DE_PASSE@IP_NVR:554/cam/realmonitor?channel=2&subtype=1"}
+    ],
+    seuils: {
+      confiance_detection: 0.5,
+      duree_presence_suspecte_sec: 20,
+      mouvement_rapide_pixels: 80,
+      frames_mouvement_rapide: 5
+    },
+    delai_entre_alertes_sec: 60,
+    dashboard_port: 5000
+  };
+  document.getElementById('config_json').value = JSON.stringify(cfg, null, 2);
+  document.getElementById('json_status').innerHTML = '<span style="color:#27ae60">✅ Config générée — modifiez les URLs et noms des caméras</span>';
+}
+
+function validerJson() {
+  const val = document.getElementById('config_json').value.trim();
+  const status = document.getElementById('json_status');
+  if (!val) { status.innerHTML = '<span style="color:#888">Champ vide</span>'; return; }
+  try {
+    const cfg = JSON.parse(val);
+    const nbCams = (cfg.cameras || []).length;
+    status.innerHTML = `<span style="color:#27ae60">✅ JSON valide — ${nbCams} caméra(s) configurée(s)</span>`;
+  } catch(e) {
+    status.innerHTML = `<span style="color:#e74c3c">❌ JSON invalide : ${e.message}</span>`;
+  }
+}
+</script>
+
+{% if action == 'nouveau' %}
+<script>
+async function rechercherSiret() {
+  const siret = document.getElementById('siret_input').value.trim();
+  const resultDiv = document.getElementById('siret_result');
+
+  if (siret.length !== 14) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="color:#e74c3c;padding:10px;background:#1a0a0a;border-radius:8px">⚠️ Le SIRET doit contenir exactement 14 chiffres.</div>';
+    return;
+  }
+
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<div style="color:#aaa;padding:10px">⏳ Recherche en cours...</div>';
+
+  try {
+    const resp = await fetch(`/api/siret/${siret}`);
+    const data = await resp.json();
+
+    if (data.error) {
+      resultDiv.innerHTML = `<div style="color:#e74c3c;padding:10px;background:#1a0a0a;border-radius:8px">❌ ${data.error}</div>`;
+      return;
+    }
+
+    // Pré-remplir le formulaire
+    if (data.nom)          document.getElementById('f_nom_magasin').value  = data.nom;
+    if (data.adresse)      document.getElementById('f_adresse').value       = data.adresse;
+    if (data.contact_nom)  document.getElementById('f_contact_nom').value   = data.contact_nom;
+    if (data.siret)        document.getElementById('f_siret').value          = data.siret;
+    if (data.forme_juridique) document.getElementById('f_forme_juridique').value = data.forme_juridique;
+    if (data.activite)     document.getElementById('f_activite').value       = data.activite;
+
+    // Générer username automatique
+    if (data.nom && !document.getElementById('f_username').value) {
+      const slug = data.nom.toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g,'')
+        .replace(/[^a-z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').substring(0,20);
+      document.getElementById('f_username').value = slug;
+    }
+
+    // Afficher un résumé
+    resultDiv.innerHTML = `
+      <div style="background:#0a1a0a;border:1px solid #27ae60;border-radius:8px;padding:14px">
+        <div style="color:#27ae60;font-weight:700;margin-bottom:10px">✅ Entreprise trouvée — formulaire pré-rempli</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+          <div><span style="color:#666">Raison sociale :</span> <span style="color:#ddd">${data.nom || '—'}</span></div>
+          <div><span style="color:#666">SIRET :</span> <span style="color:#ddd;font-family:monospace">${data.siret || '—'}</span></div>
+          <div><span style="color:#666">Forme juridique :</span> <span style="color:#ddd">${data.forme_juridique || '—'}</span></div>
+          <div><span style="color:#666">Activité :</span> <span style="color:#ddd">${data.activite || '—'}</span></div>
+          <div style="grid-column:1/-1"><span style="color:#666">Adresse :</span> <span style="color:#ddd">${data.adresse || '—'}</span></div>
+          ${data.contact_nom ? `<div><span style="color:#666">Dirigeant :</span> <span style="color:#ddd">${data.contact_nom}</span></div>` : ''}
+        </div>
+        <div style="color:#888;font-size:12px;margin-top:10px">Vérifiez et complétez les informations ci-dessous avant de valider.</div>
+      </div>`;
+  } catch(e) {
+    resultDiv.innerHTML = '<div style="color:#e74c3c;padding:10px;background:#1a0a0a;border-radius:8px">❌ Erreur réseau. Vérifiez votre connexion.</div>';
+  }
+}
+
+// Recherche au Enter dans le champ SIRET
+document.getElementById('siret_input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); rechercherSiret(); }
+});
+</script>
+{% endif %}
+{% endblock %}
