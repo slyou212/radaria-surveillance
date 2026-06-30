@@ -92,8 +92,13 @@ SAC_CLASSES   = {24: "sac à dos", 26: "sac à main", 28: "valise"}
 CONSO_CLASSES = {39: "bouteille", 40: "verre", 41: "tasse",
                  46: "banane", 47: "pomme", 48: "sandwich",
                  49: "orange", 53: "pizza"}
-DUREE_SAC_SUSPECT = SEUILS.get("duree_sac_suspect_sec", 20)  # secondes avec sac détecté avant alerte
-CONSO_CONF        = 0.45 # seuil confiance détection objet consommation
+DUREE_SAC_SUSPECT    = SEUILS.get("duree_sac_suspect_sec", 20)  # secondes avec sac détecté avant alerte
+CONSO_CONF           = 0.45 # seuil confiance détection objet consommation
+
+# ── Paramètres visiteurs ─────────────────────────────────────
+FENETRE_RETOUR_MIN   = CFG.get("fenetre_retour_visiteur_min", 60)  # si même personne revient dans les X min → passage supplémentaire
+DUREE_EMPLOYE_HEURES = CFG.get("duree_employe_heures", 4)          # resté > Xh = employé → exclu
+ZONES_EMPLOYES       = CFG.get("zones_employes", [])               # zones employés [[x1,y1,x2,y2]] normalisé 0-1 ex: [[0.7,0,1.0,1.0]]
 
 ALERTES_LOG_FILE    = BASE_DIR / "alertes_log.json"
 VISITEURS_LOG_FILE  = BASE_DIR / "visiteurs_log.json"
@@ -479,7 +484,18 @@ class CameraDetecteur:
                     }
                 hist = self.historique[tid]
                 duree = time.time() - hist["debut"]
-                # Sauvegarder photo visiteur (une fois, nommée par numéro)
+                # ── Détection zone employé ──────────────────────────────
+                if visiteurs_actifs.get(tid) and ZONES_EMPLOYES:
+                    va = visiteurs_actifs[tid]
+                    va["frames_total"] = va.get("frames_total", 0) + 1
+                    pcx_norm = cx / max(frame.shape[1], 1)
+                    pcy_norm = cy / max(frame.shape[0], 1)
+                    for zone in ZONES_EMPLOYES:
+                        if (zone[0] <= pcx_norm <= zone[2] and zone[1] <= pcy_norm <= zone[3]):
+                            va["frames_employe"] = va.get("frames_employe", 0) + 1
+                            break
+
+                # ── Photo visiteur : une seule par track ID ──────────────
                 if visiteurs_actifs.get(tid) and visiteurs_actifs[tid]["photo"] is None:
                     num = visiteurs_actifs[tid].get("numero", 0)
                     photo_name = f"V{num:05d}_{self.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
@@ -586,26 +602,82 @@ class CameraDetecteur:
         return frame
 
     def _clore_visiteurs_absents(self, ids_vus):
-        """Enregistre les visiteurs qui ne sont plus visibles à l'écran."""
+        """Enregistre les visiteurs qui ne sont plus visibles — avec déduplication et exclusion employés."""
         partis = [tid for tid in list(visiteurs_actifs.keys()) if tid not in ids_vus]
         for tid in partis:
             v = visiteurs_actifs.pop(tid)
             duree_sec = int(time.time() - v["debut_ts"])
             num = v.get("numero", 0)
-            entree = {
-                "id": f"V{num:05d}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                "numero": num,
-                "date": datetime.now().strftime("%Y-%m-%d"),
-                "heure_entree": v["debut"],
-                "heure_sortie": datetime.now().strftime("%H:%M:%S"),
-                "duree_sec": duree_sec,
-                "camera": v["camera"],
-                "photo": v.get("photo"),
-                "categorie": "inconnu",
-            }
-            visiteurs_log.insert(0, entree)
-            if len(visiteurs_log) > 1000:
-                visiteurs_log.pop()
+            now = datetime.now()
+            now_str = now.strftime("%Y-%m-%d")
+            heure_sortie = now.strftime("%H:%M:%S")
+
+            # ── EXCLUSION EMPLOYÉS ───────────────────────────────────────
+            # 1. Resté plus de X heures = employé
+            if duree_sec > DUREE_EMPLOYE_HEURES * 3600:
+                logger.info(f"[VISITEURS] ID:{tid} ignoré — employé (durée {duree_sec//3600}h)")
+                if v.get("photo"):
+                    try: (VISITEURS_DIR / v["photo"]).unlink(missing_ok=True)
+                    except: pass
+                continue
+            # 2. Passé > 70% du temps dans zone employé
+            frames_total = v.get("frames_total", 0)
+            frames_emp   = v.get("frames_employe", 0)
+            if frames_total > 0 and frames_emp / frames_total > 0.70:
+                logger.info(f"[VISITEURS] ID:{tid} ignoré — zone employé ({frames_emp}/{frames_total} frames)")
+                if v.get("photo"):
+                    try: (VISITEURS_DIR / v["photo"]).unlink(missing_ok=True)
+                    except: pass
+                continue
+
+            # ── DÉDUPLICATION : retour dans la fenêtre de X minutes ─────
+            # Si une entrée récente existe pour cette caméra aujourd'hui
+            # → c'est probablement la même personne qui est revenue
+            fenetre_sec = FENETRE_RETOUR_MIN * 60
+            entree_existante = None
+            for e in visiteurs_log[:40]:
+                if (e.get("date") == now_str
+                        and e.get("camera") == v["camera"]
+                        and e.get("categorie") not in ("employe",)
+                        and e.get("heure_sortie")):
+                    try:
+                        ts_sortie = datetime.strptime(
+                            f"{now_str} {e['heure_sortie']}", "%Y-%m-%d %H:%M:%S"
+                        ).timestamp()
+                        if time.time() - ts_sortie < fenetre_sec:
+                            entree_existante = e
+                            break
+                    except Exception:
+                        pass
+
+            if entree_existante:
+                # Même personne revenue → passage supplémentaire, pas de nouvelle entrée
+                entree_existante["nb_passages"] = entree_existante.get("nb_passages", 1) + 1
+                entree_existante["heure_sortie"]     = heure_sortie
+                entree_existante["duree_totale_sec"] = (
+                    entree_existante.get("duree_totale_sec", entree_existante.get("duree_sec", 0))
+                    + duree_sec
+                )
+                logger.info(f"[VISITEURS] Passage #{entree_existante['nb_passages']} "
+                            f"→ entrée {entree_existante['id']}")
+            else:
+                # Nouvelle entrée visiteur
+                entree = {
+                    "id": f"V{num:05d}_{now.strftime('%Y%m%d%H%M%S')}",
+                    "numero": num,
+                    "date": now_str,
+                    "heure_entree": v["debut"],
+                    "heure_sortie": heure_sortie,
+                    "duree_sec": duree_sec,
+                    "duree_totale_sec": duree_sec,
+                    "nb_passages": 1,
+                    "camera": v["camera"],
+                    "photo": v.get("photo"),
+                    "categorie": "inconnu",
+                }
+                visiteurs_log.insert(0, entree)
+                if len(visiteurs_log) > 1000:
+                    visiteurs_log.pop()
             with _save_lock:
                 _sauvegarder_json(VISITEURS_LOG_FILE, visiteurs_log)
 

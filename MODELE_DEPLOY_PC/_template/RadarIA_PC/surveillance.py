@@ -65,7 +65,6 @@ LICENSE_KEY    = CFG.get("license_key", "")
 BACKOFFICE_URL = CFG.get("backoffice_url", "")
 SEUILS        = CFG["seuils"]
 DELAI_ALERTE  = CFG.get("delai_entre_alertes_sec", 30)
-# Délai réduit pour alertes "action rapide" (vol en cours, pas besoin d'attendre)
 DELAI_ALERTE_RAPIDE = CFG.get("delai_alertes_rapides_sec", 15)
 PORT          = CFG.get("dashboard_port", 5000)
 
@@ -93,8 +92,13 @@ SAC_CLASSES   = {24: "sac à dos", 26: "sac à main", 28: "valise"}
 CONSO_CLASSES = {39: "bouteille", 40: "verre", 41: "tasse",
                  46: "banane", 47: "pomme", 48: "sandwich",
                  49: "orange", 53: "pizza"}
-DUREE_SAC_SUSPECT = SEUILS.get("duree_sac_suspect_sec", 20)  # secondes avec sac détecté avant alerte
-CONSO_CONF        = 0.45 # seuil confiance détection objet consommation
+DUREE_SAC_SUSPECT    = SEUILS.get("duree_sac_suspect_sec", 20)  # secondes avec sac détecté avant alerte
+CONSO_CONF           = 0.45 # seuil confiance détection objet consommation
+
+# ── Paramètres visiteurs ─────────────────────────────────────
+FENETRE_RETOUR_MIN   = CFG.get("fenetre_retour_visiteur_min", 60)  # si même personne revient dans les X min → passage supplémentaire
+DUREE_EMPLOYE_HEURES = CFG.get("duree_employe_heures", 4)          # resté > Xh = employé → exclu
+ZONES_EMPLOYES       = CFG.get("zones_employes", [])               # zones employés [[x1,y1,x2,y2]] normalisé 0-1 ex: [[0.7,0,1.0,1.0]]
 
 ALERTES_LOG_FILE    = BASE_DIR / "alertes_log.json"
 VISITEURS_LOG_FILE  = BASE_DIR / "visiteurs_log.json"
@@ -337,7 +341,7 @@ class CameraDetecteur:
         statut = apprentissage.get("statuts_par_type", {}).get(type_alerte, "actif")
         if statut == "silence":
             return  # Type silencé automatiquement par l'IA
-        # Délai adaptatif par type : alertes "action rapide" ont un délai court
+        # Délai adaptatif : si type "prudent", délai x3
         TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
         base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
         delai = base_delai * 3 if statut == "prudent" else base_delai
@@ -480,7 +484,18 @@ class CameraDetecteur:
                     }
                 hist = self.historique[tid]
                 duree = time.time() - hist["debut"]
-                # Sauvegarder photo visiteur (une fois, nommée par numéro)
+                # ── Détection zone employé ──────────────────────────────
+                if visiteurs_actifs.get(tid) and ZONES_EMPLOYES:
+                    va = visiteurs_actifs[tid]
+                    va["frames_total"] = va.get("frames_total", 0) + 1
+                    pcx_norm = cx / max(frame.shape[1], 1)
+                    pcy_norm = cy / max(frame.shape[0], 1)
+                    for zone in ZONES_EMPLOYES:
+                        if (zone[0] <= pcx_norm <= zone[2] and zone[1] <= pcy_norm <= zone[3]):
+                            va["frames_employe"] = va.get("frames_employe", 0) + 1
+                            break
+
+                # ── Photo visiteur : une seule par track ID ──────────────
                 if visiteurs_actifs.get(tid) and visiteurs_actifs[tid]["photo"] is None:
                     num = visiteurs_actifs[tid].get("numero", 0)
                     photo_name = f"V{num:05d}_{self.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
@@ -587,26 +602,82 @@ class CameraDetecteur:
         return frame
 
     def _clore_visiteurs_absents(self, ids_vus):
-        """Enregistre les visiteurs qui ne sont plus visibles à l'écran."""
+        """Enregistre les visiteurs qui ne sont plus visibles — avec déduplication et exclusion employés."""
         partis = [tid for tid in list(visiteurs_actifs.keys()) if tid not in ids_vus]
         for tid in partis:
             v = visiteurs_actifs.pop(tid)
             duree_sec = int(time.time() - v["debut_ts"])
             num = v.get("numero", 0)
-            entree = {
-                "id": f"V{num:05d}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                "numero": num,
-                "date": datetime.now().strftime("%Y-%m-%d"),
-                "heure_entree": v["debut"],
-                "heure_sortie": datetime.now().strftime("%H:%M:%S"),
-                "duree_sec": duree_sec,
-                "camera": v["camera"],
-                "photo": v.get("photo"),
-                "categorie": "inconnu",
-            }
-            visiteurs_log.insert(0, entree)
-            if len(visiteurs_log) > 1000:
-                visiteurs_log.pop()
+            now = datetime.now()
+            now_str = now.strftime("%Y-%m-%d")
+            heure_sortie = now.strftime("%H:%M:%S")
+
+            # ── EXCLUSION EMPLOYÉS ───────────────────────────────────────
+            # 1. Resté plus de X heures = employé
+            if duree_sec > DUREE_EMPLOYE_HEURES * 3600:
+                logger.info(f"[VISITEURS] ID:{tid} ignoré — employé (durée {duree_sec//3600}h)")
+                if v.get("photo"):
+                    try: (VISITEURS_DIR / v["photo"]).unlink(missing_ok=True)
+                    except: pass
+                continue
+            # 2. Passé > 70% du temps dans zone employé
+            frames_total = v.get("frames_total", 0)
+            frames_emp   = v.get("frames_employe", 0)
+            if frames_total > 0 and frames_emp / frames_total > 0.70:
+                logger.info(f"[VISITEURS] ID:{tid} ignoré — zone employé ({frames_emp}/{frames_total} frames)")
+                if v.get("photo"):
+                    try: (VISITEURS_DIR / v["photo"]).unlink(missing_ok=True)
+                    except: pass
+                continue
+
+            # ── DÉDUPLICATION : retour dans la fenêtre de X minutes ─────
+            # Si une entrée récente existe pour cette caméra aujourd'hui
+            # → c'est probablement la même personne qui est revenue
+            fenetre_sec = FENETRE_RETOUR_MIN * 60
+            entree_existante = None
+            for e in visiteurs_log[:40]:
+                if (e.get("date") == now_str
+                        and e.get("camera") == v["camera"]
+                        and e.get("categorie") not in ("employe",)
+                        and e.get("heure_sortie")):
+                    try:
+                        ts_sortie = datetime.strptime(
+                            f"{now_str} {e['heure_sortie']}", "%Y-%m-%d %H:%M:%S"
+                        ).timestamp()
+                        if time.time() - ts_sortie < fenetre_sec:
+                            entree_existante = e
+                            break
+                    except Exception:
+                        pass
+
+            if entree_existante:
+                # Même personne revenue → passage supplémentaire, pas de nouvelle entrée
+                entree_existante["nb_passages"] = entree_existante.get("nb_passages", 1) + 1
+                entree_existante["heure_sortie"]     = heure_sortie
+                entree_existante["duree_totale_sec"] = (
+                    entree_existante.get("duree_totale_sec", entree_existante.get("duree_sec", 0))
+                    + duree_sec
+                )
+                logger.info(f"[VISITEURS] Passage #{entree_existante['nb_passages']} "
+                            f"→ entrée {entree_existante['id']}")
+            else:
+                # Nouvelle entrée visiteur
+                entree = {
+                    "id": f"V{num:05d}_{now.strftime('%Y%m%d%H%M%S')}",
+                    "numero": num,
+                    "date": now_str,
+                    "heure_entree": v["debut"],
+                    "heure_sortie": heure_sortie,
+                    "duree_sec": duree_sec,
+                    "duree_totale_sec": duree_sec,
+                    "nb_passages": 1,
+                    "camera": v["camera"],
+                    "photo": v.get("photo"),
+                    "categorie": "inconnu",
+                }
+                visiteurs_log.insert(0, entree)
+                if len(visiteurs_log) > 1000:
+                    visiteurs_log.pop()
             with _save_lock:
                 _sauvegarder_json(VISITEURS_LOG_FILE, visiteurs_log)
 
@@ -765,141 +836,4 @@ def api_types_statuts():
 def api_type_statut_set(type_alerte):
     """Permet de forcer manuellement le statut d'un type (actif/silence/prudent)."""
     data = request.get_json(silent=True) or {}
-    statut = data.get("statut", "actif")
-    if statut not in ("actif", "prudent", "silence"):
-        return jsonify({"error": "statut invalide"}), 400
-    apprentissage.setdefault("statuts_par_type", {})[type_alerte] = statut
-    _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
-    logger.info(f"Statut type '{type_alerte}' force manuellement → {statut}")
-    return jsonify({"ok": True, "type": type_alerte, "statut": statut})
-
-@app.route("/alertes/<nom>")
-def image_alerte(nom):
-    p = ALERTES_DIR / nom
-    return send_file(str(p)) if p.exists() else ("Introuvable", 404)
-
-@app.route("/visiteurs/<nom>")
-def image_visiteur(nom):
-    p = VISITEURS_DIR / nom
-    return send_file(str(p)) if p.exists() else ("Introuvable", 404)
-
-@app.route("/videos/<nom>")
-def video_alerte(nom):
-    p = VIDEOS_DIR / nom
-    if not p.exists():
-        return "Introuvable", 404
-    # Support Range requests pour la lecture vidéo dans le navigateur
-    file_size = p.stat().st_size
-    range_header = request.headers.get("Range", None)
-    if range_header:
-        byte_start, byte_end = 0, file_size - 1
-        match = __import__("re").search(r"bytes=(\d+)-(\d*)", range_header)
-        if match:
-            byte_start = int(match.group(1))
-            if match.group(2):
-                byte_end = int(match.group(2))
-        length = byte_end - byte_start + 1
-        with open(str(p), "rb") as f:
-            f.seek(byte_start)
-            data = f.read(length)
-        resp = app.response_class(data, 206, mimetype="video/mp4", direct_passthrough=True)
-        resp.headers["Content-Range"] = f"bytes {byte_start}-{byte_end}/{file_size}"
-        resp.headers["Accept-Ranges"] = "bytes"
-        resp.headers["Content-Length"] = str(length)
-        return resp
-    resp = send_file(str(p), mimetype="video/mp4")
-    resp.headers["Accept-Ranges"] = "bytes"
-    return resp
-
-@app.route("/api/visiteurs")
-def api_visiteurs():
-    date_f = request.args.get("date", "")
-    result = visiteurs_log
-    if date_f:
-        result = [v for v in result if v.get("date","") == date_f]
-    return jsonify(result[:200])
-
-@app.route("/api/visiteurs/<visiteur_id>/categorie", methods=["POST"])
-def api_visiteur_categorie(visiteur_id):
-    data = request.get_json(silent=True) or {}
-    cat = data.get("categorie", "inconnu")
-    for v in visiteurs_log:
-        if v.get("id") == visiteur_id:
-            v["categorie"] = cat
-            with _save_lock:
-                _sauvegarder_json(VISITEURS_LOG_FILE, visiteurs_log)
-            return jsonify({"ok": True})
-    return jsonify({"error": "Visiteur introuvable"}), 404
-
-@app.route("/api/visiteurs/actifs")
-def api_visiteurs_actifs():
-    return jsonify([
-        {"id": tid, "camera": v["camera"], "debut": v["debut"]}
-        for tid, v in visiteurs_actifs.items()
-    ])
-
-@app.route("/historique")
-def historique():
-    return render_template("historique.html",
-        cameras=list({a["camera"] for a in alertes_log}),
-        types=["presence_longue", "mouvement_rapide", "posture_basse"])
-
-@app.route("/visiteurs")
-def visiteurs_page():
-    return render_template("visiteurs.html")
-
-def backoffice_register(ip):
-    """Enregistre ce PC dans le backoffice au démarrage."""
-    if not LICENSE_KEY or not BACKOFFICE_URL:
-        return
-    try:
-        import urllib.request as _req, platform
-        payload = json.dumps({
-            "license_key": LICENSE_KEY,
-            "hostname": socket.gethostname(),
-            "ip_locale": ip,
-            "os_info": platform.system() + " " + platform.release(),
-            "nb_cameras": len(CFG.get("cameras", [])),
-        }).encode()
-        req = _req.Request(f"{BACKOFFICE_URL}/api/register", data=payload,
-            headers={"Content-Type": "application/json"}, method="POST")
-        _req.urlopen(req, timeout=10)
-        logger.info("PC enregistre dans le backoffice")
-    except Exception as e:
-        logger.warning(f"Erreur register backoffice: {e}")
-
-def heartbeat_loop():
-    """Envoie un ping au backoffice toutes les 60 secondes."""
-    if not LICENSE_KEY or not BACKOFFICE_URL:
-        return
-    import urllib.request as _req
-    while True:
-        time.sleep(60)
-        try:
-            actives = sum(1 for c in cameras.values() if c.frame is not None)
-            payload = json.dumps({
-                "license_key": LICENSE_KEY,
-                "cameras_actives": actives,
-                "nb_cameras": len(cameras),
-            }).encode()
-            req = _req.Request(f"{BACKOFFICE_URL}/api/heartbeat", data=payload,
-                headers={"Content-Type": "application/json"}, method="POST")
-            _req.urlopen(req, timeout=5)
-            logger.info(f"Heartbeat OK ({actives}/{len(cameras)} cameras actives)")
-        except Exception as e:
-            logger.warning(f"Heartbeat error: {e}")
-
-if __name__ == "__main__":
-    import socket
-    ip = socket.gethostbyname(socket.gethostname())
-    print(f"\n{'='*50}\n  SURVEILLANCE DEMARREE\n  Dashboard: http://{ip}:{PORT}\n{'='*50}\n")
-    for c in CFG["cameras"]:
-        cam = CameraDetecteur(c)
-        cam.demarrer()
-        cameras[cam.id] = cam
-    # Enregistrement + heartbeat backoffice
-    backoffice_register(ip)
-    threading.Thread(target=heartbeat_loop, daemon=True).start()
-    # Sync historique alertes depuis backoffice
-    threading.Thread(target=sync_alertes_backoffice, daemon=True).start()
-    app.run(host="0.0.0.0", port=PORT, threaded=True)
+    statut = data.get("statut",
