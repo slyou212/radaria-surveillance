@@ -24,11 +24,4 @@
     "mouvement_rapide_pixels":     80,
     "frames_mouvement_rapide":     5
   },
-  "delai_entre_alertes_sec": 30,
-  "delai_alertes_rapides_sec": 15,
-  "dashboard_port": 5000,
-
-  "fenetre_retour_visiteur_min": 60,
-  "duree_employe_heures": 4,
-  "zones_employes": []
-}
+  "delai_entre_alerte
