@@ -65,6 +65,7 @@ LICENSE_KEY    = CFG.get("license_key", "")
 BACKOFFICE_URL = CFG.get("backoffice_url", "")
 SEUILS        = CFG["seuils"]
 DELAI_ALERTE  = CFG.get("delai_entre_alertes_sec", 30)
+# Délai réduit pour alertes "action rapide" (vol en cours, pas besoin d'attendre)
 DELAI_ALERTE_RAPIDE = CFG.get("delai_alertes_rapides_sec", 15)
 PORT          = CFG.get("dashboard_port", 5000)
 
@@ -336,7 +337,7 @@ class CameraDetecteur:
         statut = apprentissage.get("statuts_par_type", {}).get(type_alerte, "actif")
         if statut == "silence":
             return  # Type silencé automatiquement par l'IA
-        # Délai adaptatif : si type "prudent", délai x3
+        # Délai adaptatif par type : alertes "action rapide" ont un délai court
         TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
         base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
         delai = base_delai * 3 if statut == "prudent" else base_delai

@@ -19,10 +19,12 @@
   "destinataires_whatsapp": ["whatsapp:+33XXXXXXXXX"],
   "seuils": {
     "confiance_detection":         0.5,
-    "duree_presence_suspecte_sec": 20,
+    "duree_presence_suspecte_sec": 12,
+    "duree_sac_suspect_sec":       20,
     "mouvement_rapide_pixels":     80,
     "frames_mouvement_rapide":     5
   },
-  "delai_entre_alertes_sec": 60,
+  "delai_entre_alertes_sec": 30,
+  "delai_alertes_rapides_sec": 15,
   "dashboard_port": 5000
 }
