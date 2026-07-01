@@ -320,9 +320,15 @@ def generer_pdf_contrat(client, contrat, signe=False):
             self.set_fill_color(13, 13, 43)
             self.rect(0, 0, 210, 28, 'F')
             self.set_y(6)
+            self.set_x(18)
+            # Logo : "Radar" blanc + "IA" rouge — identique au site
             self.set_font("Helvetica", "B", 18)
-            self.set_text_color(123, 140, 222)
-            self.cell(0, 8, "RadarIA", align="L", new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(255, 255, 255)
+            w_radar = self.get_string_width("Radar") + 1
+            self.cell(w_radar, 8, "Radar", new_x="RIGHT", new_y="NONE")
+            self.set_text_color(229, 57, 53)
+            self.cell(20, 8, "IA", new_x="LMARGIN", new_y="NEXT")
+            self.set_x(18)
             self.set_font("Helvetica", "", 9)
             self.set_text_color(160, 160, 180)
             self.cell(0, 5, "Surveillance par intelligence artificielle", align="L")
@@ -571,6 +577,8 @@ def dashboard():
     cur.execute("SELECT COUNT(*) as n FROM alertes_centrales WHERE date=CURRENT_DATE::TEXT"); alertes_today = cur.fetchone()["n"]
     cur.execute("SELECT COALESCE(SUM(prix_mensuel),0) as n FROM clients WHERE statut='actif'"); ca_mensuel = cur.fetchone()["n"]
     cur.execute("SELECT COUNT(*) as n FROM sinistres WHERE statut='ouvert'"); sinistres_ouverts = cur.fetchone()["n"]
+    cur.execute("SELECT COUNT(*) as n FROM sinistres WHERE statut='en_cours'"); sinistres_en_cours = cur.fetchone()["n"]
+    cur.execute("SELECT COUNT(*) as n FROM sinistres WHERE statut='resolu'"); sinistres_resolus = cur.fetchone()["n"]
     cur.execute("""
         SELECT s.*, c.nom_magasin FROM sinistres s
         JOIN clients c ON c.id=s.client_id
@@ -585,7 +593,8 @@ def dashboard():
         sd['date_resolution']  = str(sd['date_resolution'])[:10]  if sd.get('date_resolution')  else None
         sinistres.append(sd)
     stats = {"total_clients": total_clients, "online": online, "alertes_today": alertes_today,
-             "ca_mensuel": ca_mensuel, "sinistres_ouverts": sinistres_ouverts}
+             "ca_mensuel": ca_mensuel, "sinistres_ouverts": sinistres_ouverts,
+             "sinistres_en_cours": sinistres_en_cours, "sinistres_resolus": sinistres_resolus}
     return render_template("dashboard.html", clients=clients, stats=stats, sinistres=sinistres)
 
 # =================================================================
@@ -741,6 +750,19 @@ def edit_client(client_id):
         flash("Client mis a jour","success"); return redirect(url_for("client_detail",client_id=client_id))
     cur.close(); conn.close()
     return render_template("client_form.html", client=dict(client), action="edit")
+
+@app.route("/client/<int:client_id>/reset-password", methods=["POST"])
+@login_required
+def reset_password_client(client_id):
+    new_pwd = request.form.get("new_password","").strip()
+    if not new_pwd:
+        flash("Mot de passe vide — aucun changement","warning")
+        return redirect(url_for("client_detail", client_id=client_id))
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE clients SET password_hash=%s WHERE id=%s", (hash_password(new_pwd), client_id))
+    conn.commit(); cur.close(); conn.close()
+    flash("Mot de passe app mobile mis à jour ✓","success")
+    return redirect(url_for("client_detail", client_id=client_id))
 
 @app.route("/client/<int:client_id>/suspension", methods=["POST"])
 @login_required
@@ -1371,6 +1393,29 @@ def api_agent_envoyer_commande():
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True, "message": f"Commande '{action}' mise en file pour {lk[:8]}..."})
 
+@app.route("/api/agent/deployer_tous", methods=["POST"])
+@login_required
+def api_deployer_tous():
+    """Envoie 'mettre_a_jour' à tous les agents actifs (EN LIGNE)."""
+    conn = get_db(); cur = conn.cursor()
+    # Récupérer tous les agents en ligne (vu < 10 min)
+    cur.execute("""
+        SELECT a.license_key, c.nom_magasin FROM agents_status a
+        JOIN clients c ON c.id = a.client_id
+        WHERE a.last_seen > NOW() - INTERVAL '10 minutes'
+    """)
+    agents = cur.fetchall()
+    nb = 0
+    for a in agents:
+        cur.execute("""
+            INSERT INTO agents_commandes (client_id, license_key, action, parametres)
+            SELECT c.id, %s, 'mettre_a_jour', '{}'
+            FROM clients c WHERE c.license_key = %s
+        """, (a["license_key"], a["license_key"]))
+        nb += 1
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True, "nb": nb, "message": f"Mise à jour lancée sur {nb} agent(s) en ligne"})
+
 @app.route("/agents")
 @login_required
 def supervision_agents():
@@ -1410,11 +1455,4 @@ def supervision_agents():
     return render_template("agents.html",
                            agents=agents, incidents=incidents,
                            clients_list=clients_list,
-                           nb_incidents=len(incidents))
-
-# =================================================================
-# MAIN
-# =================================================================
-init_db()
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
+                           nb_inci
