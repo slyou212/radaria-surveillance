@@ -45,6 +45,8 @@ def charger_config():
                     cfg["delai_entre_alertes_sec"] = remote["delai_entre_alertes_sec"]
                 if remote.get("dashboard_port"):
                     cfg["dashboard_port"] = remote["dashboard_port"]
+                if remote.get("camera_config"):
+                    cfg["camera_config"] = remote["camera_config"]
                 # Cache pour mode hors ligne
                 with open(cache_path, "w", encoding="utf-8") as fc:
                     json.dump(cfg, fc, ensure_ascii=False, indent=2)
@@ -54,7 +56,7 @@ def charger_config():
             if cache_path.exists():
                 with open(cache_path, encoding="utf-8") as fc:
                     cached = json.load(fc)
-                for key in ("cameras", "seuils", "delai_entre_alertes_sec", "dashboard_port"):
+                for key in ("cameras", "seuils", "delai_entre_alertes_sec", "dashboard_port", "camera_config"):
                     if cached.get(key):
                         cfg[key] = cached[key]
     return cfg
@@ -67,6 +69,37 @@ SEUILS        = CFG["seuils"]
 DELAI_ALERTE  = CFG.get("delai_entre_alertes_sec", 30)
 DELAI_ALERTE_RAPIDE = CFG.get("delai_alertes_rapides_sec", 15)
 PORT          = CFG.get("dashboard_port", 5000)
+
+# ── Config gestes par caméra (mise à jour dynamique toutes les 5 min) ──
+_gestes_lock = threading.Lock()
+CAMERA_GESTES_CONFIG = dict(CFG.get("camera_config", {}))
+
+def _rafraichir_config_gestes():
+    """Recharge la config gestes depuis le backoffice toutes les 5 min."""
+    while True:
+        time.sleep(300)
+        if not (LICENSE_KEY and BACKOFFICE_URL):
+            continue
+        try:
+            import urllib.request as _req2
+            payload = json.dumps({"license_key": LICENSE_KEY}).encode()
+            req = _req2.Request(
+                f"{BACKOFFICE_URL}/api/config",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with _req2.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("ok") and data.get("config", {}).get("camera_config"):
+                with _gestes_lock:
+                    CAMERA_GESTES_CONFIG.clear()
+                    CAMERA_GESTES_CONFIG.update(data["config"]["camera_config"])
+                logger.info("Config gestes rafraîchie depuis le backoffice")
+        except Exception as e:
+            logger.warning(f"Rafraîchissement config gestes: {e}")
+
+threading.Thread(target=_rafraichir_config_gestes, daemon=True).start()
 
 ALERTES_DIR   = BASE_DIR / "alertes"
 ALERTES_DIR.mkdir(exist_ok=True)
@@ -298,6 +331,9 @@ class CameraDetecteur:
         self.actif  = False
         self.derniere_alerte = {}
         self.historique = {}
+        # Compteur alertes journalier (reset à minuit)
+        self._alertes_today       = {}
+        self._alertes_today_date  = datetime.now().strftime("%Y-%m-%d")
         # Buffer circulaire pour clips vidéo
         max_frames = BUFFER_SECONDES * FPS_BUFFER
         self.frame_buffer = deque(maxlen=max_frames)
@@ -336,18 +372,50 @@ class CameraDetecteur:
 
     def envoyer_alerte(self, type_alerte, frame):
         maintenant = time.time()
+
+        # ── CONFIG GESTES PAR CAMÉRA (depuis backoffice) ──
+        with _gestes_lock:
+            cam_cfg = dict(CAMERA_GESTES_CONFIG.get(self.nom, {}))
+
+        # Caméra désactivée globalement
+        if cam_cfg and not cam_cfg.get("active", True):
+            return
+
+        # Ce geste est-il activé pour cette caméra ?
+        gestes = cam_cfg.get("gestes", {})
+        if gestes and not gestes.get(type_alerte, True):
+            return
+
+        # Reset compteur journalier si nouveau jour
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._alertes_today_date != today:
+            self._alertes_today      = {}
+            self._alertes_today_date = today
+
+        # Limite alertes par jour par type
+        alertes_max = cam_cfg.get("alertes_max_jour", 20) if cam_cfg else 20
+        if self._alertes_today.get(type_alerte, 0) >= alertes_max:
+            return
+
         # ── APPRENTISSAGE PAR TYPE ──
         # Si l'IA a appris que ce type génère trop de faux positifs, on l'ignore
         statut = apprentissage.get("statuts_par_type", {}).get(type_alerte, "actif")
         if statut == "silence":
             return  # Type silencé automatiquement par l'IA
-        # Délai adaptatif : si type "prudent", délai x3
-        TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
-        base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
-        delai = base_delai * 3 if statut == "prudent" else base_delai
+
+        # ── COOLDOWN (depuis config gestes ou valeur globale) ──
+        cooldown_min = cam_cfg.get("cooldown_min") if cam_cfg else None
+        if cooldown_min is not None:
+            delai = cooldown_min * 60
+        else:
+            TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
+            base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
+            delai = base_delai * 3 if statut == "prudent" else base_delai
+
         if maintenant - self.derniere_alerte.get(type_alerte, 0) < delai:
             return
         self.derniere_alerte[type_alerte] = maintenant
+        self._alertes_today[type_alerte]  = self._alertes_today.get(type_alerte, 0) + 1
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         img = ALERTES_DIR / f"{self.id}_{type_alerte}_{ts}.jpg"
         cv2.imwrite(str(img), frame)
@@ -367,10 +435,11 @@ class CameraDetecteur:
             alertes_log.pop()
         with _save_lock:
             _sauvegarder_json(ALERTES_LOG_FILE, alertes_log)
-        # Enregistrer le clip vidéo en arrière-plan
+        # Enregistrer le clip vidéo en arrière-plan (+ upload backoffice pour accès hors WiFi)
+        _alert_id = f"{self.id}_{ts}"
         threading.Thread(
             target=self._sauvegarder_clip,
-            args=(video_name, frame),
+            args=(video_name, frame, _alert_id),
             daemon=True
         ).start()
         # Envoyer au backoffice (lu par l'app mobile)
@@ -395,7 +464,40 @@ class CameraDetecteur:
             except Exception as e:
                 logger.warning(f"Backoffice alerte error: {e}")
 
-    def _sauvegarder_clip(self, video_name, trigger_frame):
+    def _uploader_clip_backoffice(self, video_name, alert_id):
+        """Upload le clip vidéo vers le backoffice pour le rendre accessible hors WiFi."""
+        try:
+            import base64, urllib.request as _req
+            video_path = VIDEOS_DIR / video_name
+            if not video_path.exists():
+                logger.warning(f"Upload clip: fichier introuvable {video_name}")
+                return
+            size_mb = video_path.stat().st_size / (1024 * 1024)
+            if size_mb > 50:
+                logger.warning(f"Clip trop lourd ({size_mb:.1f} Mo), upload ignoré")
+                return
+            video_b64 = base64.b64encode(video_path.read_bytes()).decode()
+            payload = json.dumps({
+                "license_key": LICENSE_KEY,
+                "alert_id": alert_id,
+                "video_b64": video_b64,
+            }).encode()
+            req = _req.Request(
+                f"{BACKOFFICE_URL}/api/video-upload",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            resp = _req.urlopen(req, timeout=60)
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                logger.info(f"Clip uploadé vers backoffice: {video_name} → {result.get('video_url')}")
+            else:
+                logger.warning(f"Upload clip backoffice refusé: {result}")
+        except Exception as e:
+            logger.warning(f"Upload clip backoffice error: {e}")
+
+    def _sauvegarder_clip(self, video_name, trigger_frame, alert_id=None):
         """Sauvegarde un clip vidéo H264 compatible navigateurs (imageio-ffmpeg)."""
         if self._enregistrement_actif:
             return
@@ -437,6 +539,9 @@ class CameraDetecteur:
                     writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 writer.close()
                 logger.info(f"Clip H264 sauvegarde: {video_name}")
+                # Upload vers backoffice pour accès hors WiFi
+                if alert_id and LICENSE_KEY and BACKOFFICE_URL:
+                    self._uploader_clip_backoffice(video_name, alert_id)
 
             except ImportError:
                 # Fallback mp4v si imageio-ffmpeg pas installe
@@ -446,6 +551,9 @@ class CameraDetecteur:
                 for frame in toutes_frames:
                     out.write(frame)
                 out.release()
+                # Upload vers backoffice pour accès hors WiFi
+                if alert_id and LICENSE_KEY and BACKOFFICE_URL:
+                    self._uploader_clip_backoffice(video_name, alert_id)
 
         except Exception as e:
             logger.error(f"Erreur clip vidéo: {e}")
@@ -454,7 +562,10 @@ class CameraDetecteur:
 
     def analyser(self, frame):
         try:
-            res = model.track(frame, classes=[0], conf=self.seuil_conf, persist=True, verbose=False)
+            with _gestes_lock:
+                _ccfg = dict(CAMERA_GESTES_CONFIG.get(self.nom, {}))
+            conf_min = _ccfg.get("confidence_min", self.seuil_conf) if _ccfg else self.seuil_conf
+            res = model.track(frame, classes=[0], conf=conf_min, persist=True, verbose=False)
             if not res or not res[0].boxes:
                 # Clore les visiteurs qui ont disparu
                 self._clore_visiteurs_absents(set())
@@ -836,4 +947,65 @@ def api_types_statuts():
 def api_type_statut_set(type_alerte):
     """Permet de forcer manuellement le statut d'un type (actif/silence/prudent)."""
     data = request.get_json(silent=True) or {}
-    statut = data.get("statut",
+    statut = data.get("statut", "actif")
+    if statut not in ("actif", "prudent", "silence"):
+        return jsonify({"error": "statut invalide"}), 400
+    apprentissage.setdefault("statuts_par_type", {})[type_alerte] = statut
+    _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
+    logger.info(f"Statut type '{type_alerte}' force manuellement → {statut}")
+    return jsonify({"ok": True, "type": type_alerte, "statut": statut})
+
+@app.route("/alertes/<nom>")
+def image_alerte(nom):
+    p = ALERTES_DIR / nom
+    return send_file(str(p)) if p.exists() else ("Introuvable", 404)
+
+@app.route("/visiteurs/<nom>")
+def image_visiteur(nom):
+    p = VISITEURS_DIR / nom
+    return send_file(str(p)) if p.exists() else ("Introuvable", 404)
+
+@app.route("/videos/<nom>")
+def video_alerte(nom):
+    p = VIDEOS_DIR / nom
+    if not p.exists():
+        return "Introuvable", 404
+    # Support Range requests pour la lecture vidéo dans le navigateur
+    file_size = p.stat().st_size
+    range_header = request.headers.get("Range", None)
+    if range_header:
+        byte_start, byte_end = 0, file_size - 1
+        match = __import__("re").search(r"bytes=(\d+)-(\d*)", range_header)
+        if match:
+            byte_start = int(match.group(1))
+            if match.group(2):
+                byte_end = int(match.group(2))
+        length = byte_end - byte_start + 1
+        with open(str(p), "rb") as f:
+            f.seek(byte_start)
+            data = f.read(length)
+        resp = app.response_class(data, 206, mimetype="video/mp4", direct_passthrough=True)
+        resp.headers["Content-Range"] = f"bytes {byte_start}-{byte_end}/{file_size}"
+        resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["Content-Length"] = str(length)
+        return resp
+    resp = send_file(str(p), mimetype="video/mp4")
+    resp.headers["Accept-Ranges"] = "bytes"
+    return resp
+
+@app.route("/api/visiteurs")
+def api_visiteurs():
+    date_f = request.args.get("date", "")
+    result = visiteurs_log
+    if date_f:
+        result = [v for v in result if v.get("date","") == date_f]
+    return jsonify(result[:200])
+
+@app.route("/api/visiteurs/<visiteur_id>/categorie", methods=["POST"])
+def api_visiteur_categorie(visiteur_id):
+    data = request.get_json(silent=True) or {}
+    cat = data.get("categorie", "inconnu")
+    for v in visiteurs_log:
+        if v.get("id") == visiteur_id:
+            v["categorie"] = cat
+            with 

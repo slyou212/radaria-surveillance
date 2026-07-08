@@ -45,6 +45,8 @@ def charger_config():
                     cfg["delai_entre_alertes_sec"] = remote["delai_entre_alertes_sec"]
                 if remote.get("dashboard_port"):
                     cfg["dashboard_port"] = remote["dashboard_port"]
+                if remote.get("camera_config"):
+                    cfg["camera_config"] = remote["camera_config"]
                 # Cache pour mode hors ligne
                 with open(cache_path, "w", encoding="utf-8") as fc:
                     json.dump(cfg, fc, ensure_ascii=False, indent=2)
@@ -54,7 +56,7 @@ def charger_config():
             if cache_path.exists():
                 with open(cache_path, encoding="utf-8") as fc:
                     cached = json.load(fc)
-                for key in ("cameras", "seuils", "delai_entre_alertes_sec", "dashboard_port"):
+                for key in ("cameras", "seuils", "delai_entre_alertes_sec", "dashboard_port", "camera_config"):
                     if cached.get(key):
                         cfg[key] = cached[key]
     return cfg
@@ -67,6 +69,37 @@ SEUILS        = CFG["seuils"]
 DELAI_ALERTE  = CFG.get("delai_entre_alertes_sec", 30)
 DELAI_ALERTE_RAPIDE = CFG.get("delai_alertes_rapides_sec", 15)
 PORT          = CFG.get("dashboard_port", 5000)
+
+# ── Config gestes par caméra (mise à jour dynamique toutes les 5 min) ──
+_gestes_lock = threading.Lock()
+CAMERA_GESTES_CONFIG = dict(CFG.get("camera_config", {}))
+
+def _rafraichir_config_gestes():
+    """Recharge la config gestes depuis le backoffice toutes les 5 min."""
+    while True:
+        time.sleep(300)
+        if not (LICENSE_KEY and BACKOFFICE_URL):
+            continue
+        try:
+            import urllib.request as _req2
+            payload = json.dumps({"license_key": LICENSE_KEY}).encode()
+            req = _req2.Request(
+                f"{BACKOFFICE_URL}/api/config",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with _req2.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("ok") and data.get("config", {}).get("camera_config"):
+                with _gestes_lock:
+                    CAMERA_GESTES_CONFIG.clear()
+                    CAMERA_GESTES_CONFIG.update(data["config"]["camera_config"])
+                logger.info("Config gestes rafraîchie depuis le backoffice")
+        except Exception as e:
+            logger.warning(f"Rafraîchissement config gestes: {e}")
+
+threading.Thread(target=_rafraichir_config_gestes, daemon=True).start()
 
 ALERTES_DIR   = BASE_DIR / "alertes"
 ALERTES_DIR.mkdir(exist_ok=True)
@@ -298,6 +331,9 @@ class CameraDetecteur:
         self.actif  = False
         self.derniere_alerte = {}
         self.historique = {}
+        # Compteur alertes journalier (reset à minuit)
+        self._alertes_today       = {}
+        self._alertes_today_date  = datetime.now().strftime("%Y-%m-%d")
         # Buffer circulaire pour clips vidéo
         max_frames = BUFFER_SECONDES * FPS_BUFFER
         self.frame_buffer = deque(maxlen=max_frames)
@@ -336,18 +372,50 @@ class CameraDetecteur:
 
     def envoyer_alerte(self, type_alerte, frame):
         maintenant = time.time()
+
+        # ── CONFIG GESTES PAR CAMÉRA (depuis backoffice) ──
+        with _gestes_lock:
+            cam_cfg = dict(CAMERA_GESTES_CONFIG.get(self.nom, {}))
+
+        # Caméra désactivée globalement
+        if cam_cfg and not cam_cfg.get("active", True):
+            return
+
+        # Ce geste est-il activé pour cette caméra ?
+        gestes = cam_cfg.get("gestes", {})
+        if gestes and not gestes.get(type_alerte, True):
+            return
+
+        # Reset compteur journalier si nouveau jour
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._alertes_today_date != today:
+            self._alertes_today      = {}
+            self._alertes_today_date = today
+
+        # Limite alertes par jour par type
+        alertes_max = cam_cfg.get("alertes_max_jour", 20) if cam_cfg else 20
+        if self._alertes_today.get(type_alerte, 0) >= alertes_max:
+            return
+
         # ── APPRENTISSAGE PAR TYPE ──
         # Si l'IA a appris que ce type génère trop de faux positifs, on l'ignore
         statut = apprentissage.get("statuts_par_type", {}).get(type_alerte, "actif")
         if statut == "silence":
             return  # Type silencé automatiquement par l'IA
-        # Délai adaptatif : si type "prudent", délai x3
-        TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
-        base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
-        delai = base_delai * 3 if statut == "prudent" else base_delai
+
+        # ── COOLDOWN (depuis config gestes ou valeur globale) ──
+        cooldown_min = cam_cfg.get("cooldown_min") if cam_cfg else None
+        if cooldown_min is not None:
+            delai = cooldown_min * 60
+        else:
+            TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
+            base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
+            delai = base_delai * 3 if statut == "prudent" else base_delai
+
         if maintenant - self.derniere_alerte.get(type_alerte, 0) < delai:
             return
         self.derniere_alerte[type_alerte] = maintenant
+        self._alertes_today[type_alerte]  = self._alertes_today.get(type_alerte, 0) + 1
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         img = ALERTES_DIR / f"{self.id}_{type_alerte}_{ts}.jpg"
         cv2.imwrite(str(img), frame)
@@ -367,10 +435,11 @@ class CameraDetecteur:
             alertes_log.pop()
         with _save_lock:
             _sauvegarder_json(ALERTES_LOG_FILE, alertes_log)
-        # Enregistrer le clip vidéo en arrière-plan
+        # Enregistrer le clip vidéo en arrière-plan (+ upload backoffice pour accès hors WiFi)
+        _alert_id = f"{self.id}_{ts}"
         threading.Thread(
             target=self._sauvegarder_clip,
-            args=(video_name, frame),
+            args=(video_name, frame, _alert_id),
             daemon=True
         ).start()
         # Envoyer au backoffice (lu par l'app mobile)
@@ -395,7 +464,40 @@ class CameraDetecteur:
             except Exception as e:
                 logger.warning(f"Backoffice alerte error: {e}")
 
-    def _sauvegarder_clip(self, video_name, trigger_frame):
+    def _uploader_clip_backoffice(self, video_name, alert_id):
+        """Upload le clip vidéo vers le backoffice pour le rendre accessible hors WiFi."""
+        try:
+            import base64, urllib.request as _req
+            video_path = VIDEOS_DIR / video_name
+            if not video_path.exists():
+                logger.warning(f"Upload clip: fichier introuvable {video_name}")
+                return
+            size_mb = video_path.stat().st_size / (1024 * 1024)
+            if size_mb > 50:
+                logger.warning(f"Clip trop lourd ({size_mb:.1f} Mo), upload ignoré")
+                return
+            video_b64 = base64.b64encode(video_path.read_bytes()).decode()
+            payload = json.dumps({
+                "license_key": LICENSE_KEY,
+                "alert_id": alert_id,
+                "video_b64": video_b64,
+            }).encode()
+            req = _req.Request(
+                f"{BACKOFFICE_URL}/api/video-upload",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            resp = _req.urlopen(req, timeout=60)
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                logger.info(f"Clip uploadé vers backoffice: {video_name} → {result.get('video_url')}")
+            else:
+                logger.warning(f"Upload clip backoffice refusé: {result}")
+        except Exception as e:
+            logger.warning(f"Upload clip backoffice error: {e}")
+
+    def _sauvegarder_clip(self, video_name, trigger_frame, alert_id=None):
         """Sauvegarde un clip vidéo H264 compatible navigateurs (imageio-ffmpeg)."""
         if self._enregistrement_actif:
             return
@@ -437,6 +539,9 @@ class CameraDetecteur:
                     writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 writer.close()
                 logger.info(f"Clip H264 sauvegarde: {video_name}")
+                # Upload vers backoffice pour accès hors WiFi
+                if alert_id and LICENSE_KEY and BACKOFFICE_URL:
+                    self._uploader_clip_backoffice(video_name, alert_id)
 
             except ImportError:
                 # Fallback mp4v si imageio-ffmpeg pas installe
@@ -446,6 +551,9 @@ class CameraDetecteur:
                 for frame in toutes_frames:
                     out.write(frame)
                 out.release()
+                # Upload vers backoffice pour accès hors WiFi
+                if alert_id and LICENSE_KEY and BACKOFFICE_URL:
+                    self._uploader_clip_backoffice(video_name, alert_id)
 
         except Exception as e:
             logger.error(f"Erreur clip vidéo: {e}")
@@ -454,7 +562,10 @@ class CameraDetecteur:
 
     def analyser(self, frame):
         try:
-            res = model.track(frame, classes=[0], conf=self.seuil_conf, persist=True, verbose=False)
+            with _gestes_lock:
+                _ccfg = dict(CAMERA_GESTES_CONFIG.get(self.nom, {}))
+            conf_min = _ccfg.get("confidence_min", self.seuil_conf) if _ccfg else self.seuil_conf
+            res = model.track(frame, classes=[0], conf=conf_min, persist=True, verbose=False)
             if not res or not res[0].boxes:
                 # Clore les visiteurs qui ont disparu
                 self._clore_visiteurs_absents(set())
@@ -939,6 +1050,44 @@ def backoffice_register(ip):
     except Exception as e:
         logger.warning(f"Erreur register backoffice: {e}")
 
+def snapshot_push_loop():
+    """Envoie un snapshot JPEG de chaque caméra au backoffice toutes les 5 s."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    import urllib.request as _req, base64
+    import numpy as np
+    while True:
+        time.sleep(5)
+        for cam in list(cameras.values()):
+            try:
+                with cam.lock:
+                    f = cam.frame
+                if not f:
+                    continue
+                arr = cv2.imdecode(np.frombuffer(f, np.uint8), cv2.IMREAD_COLOR)
+                if arr is None:
+                    continue
+                # Redimensionner à 640px pour limiter la bande passante
+                h, w = arr.shape[:2]
+                if w > 640:
+                    arr = cv2.resize(arr, (640, int(h * 640 / w)))
+                _, buf = cv2.imencode('.jpg', arr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                img_b64 = base64.b64encode(buf.tobytes()).decode()
+                payload = json.dumps({
+                    "license_key": LICENSE_KEY,
+                    "camera": cam.nom,
+                    "image_b64": img_b64,
+                }).encode()
+                req = _req.Request(
+                    f"{BACKOFFICE_URL}/api/snapshot",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                _req.urlopen(req, timeout=4)
+            except Exception:
+                pass
+
 def heartbeat_loop():
     """Envoie un ping au backoffice toutes les 60 secondes."""
     if not LICENSE_KEY or not BACKOFFICE_URL:
@@ -970,7 +1119,8 @@ if __name__ == "__main__":
         cameras[cam.id] = cam
     # Enregistrement + heartbeat backoffice
     backoffice_register(ip)
-    threading.Thread(target=heartbeat_loop, daemon=True).start()
+    threading.Thread(target=heartbeat_loop,      daemon=True).start()
+    threading.Thread(target=snapshot_push_loop,  daemon=True).start()
     # Sync historique alertes depuis backoffice
     threading.Thread(target=sync_alertes_backoffice, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)
