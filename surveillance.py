@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import cv2, json, os, time, threading, logging
+import cv2, json, os, time, threading, logging, urllib.request
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, Response, render_template, jsonify, send_file, request
+from flask import Flask, Response, render_template, render_template_string, jsonify, send_file, request
 from ultralytics import YOLO
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -1067,7 +1067,6 @@ def video_alerte(nom):
         resp.headers["Content-Range"] = f"bytes {byte_start}-{byte_end}/{file_size}"
         resp.headers["Accept-Ranges"] = "bytes"
         resp.headers["Content-Length"] = str(length)
-        return resp
     resp = send_file(str(p), mimetype="video/mp4")
     resp.headers["Accept-Ranges"] = "bytes"
     return resp
@@ -1188,6 +1187,111 @@ def heartbeat_loop():
         except Exception as e:
             logger.warning(f"Heartbeat error: {e}")
 
+
+# ─── KIOSK HTML ──────────────────────────────────────────────────────────────
+KIOSQUE_HTML = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="60">
+<title>RadarIA &#8212; Kiosque</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    background: {% if statut == 'suspendu' %}#c0392b{% else %}#0a0a1a{% endif %};
+    color: {% if statut == 'suspendu' %}#fff{% else %}#e0e0e0{% endif %};
+    text-align: center;
+  }
+  .logo { font-size: 3em; font-weight: 900; letter-spacing: 0.05em; margin-bottom: 0.2em; }
+  .logo span { color: #e74c3c; }
+  .subtitle { font-size: 1.1em; opacity: 0.7; margin-bottom: 2em; }
+  .status-badge {
+    padding: 0.4em 1.2em; border-radius: 999px; font-size: 0.95em;
+    font-weight: 600; letter-spacing: 0.08em; margin-bottom: 2.5em;
+    background: {% if statut == 'suspendu' %}rgba(255,255,255,0.2){% else %}#1a7a1a{% endif %};
+    color: #fff;
+  }
+  .cameras-info { font-size: 1.4em; margin-bottom: 0.5em; }
+  .alertes-info { font-size: 1em; opacity: 0.6; }
+  .warning-block {
+    margin-top: 2em; padding: 1.5em 2em;
+    background: rgba(255,255,255,0.15); border-radius: 12px;
+    max-width: 500px;
+  }
+  .warning-block h2 { font-size: 1.6em; margin-bottom: 0.5em; }
+  .warning-block p { opacity: 0.9; line-height: 1.6; }
+  footer { position: fixed; bottom: 1em; font-size: 0.75em; opacity: 0.4; }
+</style>
+</head>
+<body>
+  <div class="logo">Radar<span>IA</span></div>
+  <div class="subtitle">Surveillance intelligente &mdash; Slidis Market</div>
+
+  {% if statut == 'suspendu' %}
+  <div class="status-badge">&#9888;&#65039; LICENCE SUSPENDUE</div>
+  <div class="warning-block">
+    <h2>&#128683; Surveillance inactive</h2>
+    <p>La licence de surveillance est suspendue.<br>
+    Veuillez contacter votre administrateur RadarIA.</p>
+  </div>
+  {% else %}
+  <div class="status-badge">&#128308; SURVEILLANCE ACTIVE</div>
+  <div class="cameras-info">&#128737;&#65039; {{ nb_cameras }} / {{ total_cameras }} cam&eacute;ra(s) actives</div>
+  <div class="alertes-info">{{ nb_alertes }} alerte(s) en m&eacute;moire</div>
+  {% endif %}
+
+  <footer>RadarIA v4.7 &mdash; Protection en cours</footer>
+</body>
+</html>
+"""
+
+@app.route("/kiosque")
+def kiosque():
+    statut = "actif"
+    try:
+        url = f"{BACKOFFICE_URL}/api/pc/statut?license_key={LICENSE_KEY}"
+        with urllib.request.urlopen(url, timeout=4) as r:
+            statut = json.loads(r.read().decode()).get("statut", "actif")
+    except Exception:
+        statut = "hors-ligne"
+    nb_cam = len([c for c in cameras.values() if c.frame is not None])
+    return render_template_string(KIOSQUE_HTML,
+        statut=statut,
+        nb_cameras=nb_cam,
+        total_cameras=len(cameras),
+        nb_alertes=len(alertes_log))
+
+
+def _ping_backoffice_demarrage():
+    """Notifie le backoffice que le PC est demarre (push notification client)."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    try:
+        import socket as _sock
+        ip = _sock.gethostbyname(_sock.gethostname())
+        payload = json.dumps({
+            "license_key": LICENSE_KEY,
+            "ip": ip,
+            "version": "4.7",
+            "nb_cameras": len(CFG.get("cameras", []))
+        }).encode()
+        req = urllib.request.Request(
+            f"{BACKOFFICE_URL}/api/pc/heartbeat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+        logger.info("[PING] Backoffice notifie -- PC connecte")
+    except Exception as e:
+        logger.warning(f"[PING] Echec ping backoffice: {e}")
+
+
 if __name__ == "__main__":
     import socket
     ip = socket.gethostbyname(socket.gethostname())
@@ -1198,6 +1302,7 @@ if __name__ == "__main__":
         cameras[cam.id] = cam
     # Enregistrement + heartbeat backoffice
     backoffice_register(ip)
+    _ping_backoffice_demarrage()
     threading.Thread(target=heartbeat_loop,      daemon=True).start()
     threading.Thread(target=snapshot_push_loop,  daemon=True).start()
     # Sync historique alertes depuis backoffice
