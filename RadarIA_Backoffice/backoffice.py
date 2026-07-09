@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, secrets, hashlib, json, base64, time, smtplib, io
+import os, secrets, hashlib, json, base64, time, smtplib, io, ftplib
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 from email.mime.text import MIMEText
@@ -237,9 +237,31 @@ def init_db():
         backoffice_ms     INTEGER,
         reseau_ok         BOOLEAN DEFAULT TRUE,
         last_seen         TIMESTAMP DEFAULT NOW(),
-        statut            TEXT DEFAULT 'online'
+        statut            TEXT DEFAULT 'online',
+        UNIQUE(license_key, hostname)
     )
     """)
+    # Migration : supprimer doublons + ajouter contrainte unique sur DB existante
+    try:
+        cur.execute("""
+            DELETE FROM agents_pc a
+            USING agents_pc b
+            WHERE a.id < b.id
+              AND a.license_key = b.license_key
+              AND a.hostname = b.hostname
+        """)
+        cur.execute("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'agents_pc_lk_host_uniq'
+                ) THEN
+                    ALTER TABLE agents_pc
+                    ADD CONSTRAINT agents_pc_lk_host_uniq UNIQUE (license_key, hostname);
+                END IF;
+            END $$;
+        """)
+    except Exception:
+        pass
     cur.execute("""
     CREATE TABLE IF NOT EXISTS agents_incidents (
         id           SERIAL PRIMARY KEY,
@@ -265,6 +287,37 @@ def init_db():
         resultat    TEXT DEFAULT '',
         created_at  TIMESTAMP DEFAULT NOW(),
         executed_at TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS push_tokens (
+        id         SERIAL PRIMARY KEY,
+        client_id  INTEGER REFERENCES clients(id),
+        token      TEXT UNIQUE NOT NULL,
+        platform   TEXT DEFAULT 'ios',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )
+    """)
+    # Colonne video stockée côté serveur (pour accès hors WiFi)
+    try:
+        cur.execute("ALTER TABLE alertes_centrales ADD COLUMN IF NOT EXISTS video_data BYTEA")
+        cur.execute("ALTER TABLE alertes_centrales ADD COLUMN IF NOT EXISTS video_stored_url TEXT DEFAULT ''")
+    except Exception:
+        pass
+    # Table camera_config — configuration par caméra (gestes + IA)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS camera_config (
+        id               SERIAL PRIMARY KEY,
+        magasin_id       INTEGER NOT NULL REFERENCES clients(id),
+        camera_name      TEXT NOT NULL,
+        active           BOOLEAN DEFAULT TRUE,
+        gestes_json      TEXT DEFAULT '{}',
+        confidence_min   REAL DEFAULT 0.65,
+        cooldown_min     INTEGER DEFAULT 5,
+        alertes_max_jour INTEGER DEFAULT 20,
+        updated_at       TIMESTAMP DEFAULT NOW(),
+        UNIQUE(magasin_id, camera_name)
     )
     """)
     conn.commit()
@@ -325,7 +378,7 @@ def generer_pdf_contrat(client, contrat, signe=False):
             self.set_font("Helvetica", "B", 18)
             self.set_text_color(255, 255, 255)
             w_radar = self.get_string_width("Radar") + 1
-            self.cell(w_radar, 8, "Radar", new_x="RIGHT", new_y="NONE")
+            self.cell(w_radar, 8, "Radar", new_x="RIGHT", new_y="LAST")
             self.set_text_color(229, 57, 53)
             self.cell(20, 8, "IA", new_x="LMARGIN", new_y="NEXT")
             self.set_x(18)
@@ -1007,6 +1060,24 @@ def api_config():
     try: config = json.loads(config_json) if config_json.strip() else {}
     except Exception: config = {}
     config["nom_magasin"] = client["nom_magasin"]; config["username"] = client["username"]
+    # Inclure la config par caméra (gestes + seuils IA)
+    conn2 = get_db(); cur2 = conn2.cursor()
+    cur2.execute(
+        "SELECT camera_name,active,gestes_json,confidence_min,cooldown_min,alertes_max_jour "
+        "FROM camera_config WHERE magasin_id=%s", (client["id"],)
+    )
+    cam_rows = cur2.fetchall(); cur2.close(); conn2.close()
+    camera_config = {}
+    for cr in cam_rows:
+        try: gestes = json.loads(cr["gestes_json"] or "{}")
+        except Exception: gestes = {}
+        camera_config[cr["camera_name"]] = {
+            "active": bool(cr["active"]), "gestes": gestes,
+            "confidence_min": cr["confidence_min"],
+            "cooldown_min": cr["cooldown_min"],
+            "alertes_max_jour": cr["alertes_max_jour"],
+        }
+    config["camera_config"] = camera_config
     return jsonify({"ok":True,"config":config})
 
 @app.route("/api/register", methods=["POST"])
@@ -1056,12 +1127,32 @@ def api_alerte():
     cur.execute("SELECT id FROM clients WHERE license_key=%s AND statut='actif'", (key,))
     client = cur.fetchone()
     if not client: cur.close(); conn.close(); return jsonify({"error":"License invalide"}),403
+    alert_type = data.get("type","")
+    camera_nom = data.get("camera","")
     cur.execute("""INSERT INTO alertes_centrales (client_id,alert_id,type,camera,date,heure,image_path,video_url,suspect_id,nb_personnes)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-        (client["id"],data.get("alert_id"),data.get("type"),data.get("camera"),
+        (client["id"],data.get("alert_id"),alert_type,camera_nom,
          data.get("date",str(date.today())),data.get("heure",""),data.get("image",""),
          data.get("video_url",""),str(data.get("suspect_id","")),data.get("nb_personnes",1)))
-    conn.commit(); cur.close(); conn.close(); return jsonify({"ok":True})
+    conn.commit(); cur.close(); conn.close()
+    # Envoi push notification (async, ne bloque pas la réponse)
+    try:
+        import threading
+        type_labels = {
+            "mouvement_rapide":"Mouvement suspect","posture_basse":"Posture suspecte",
+            "presence_longue":"Présence longue","sac_suspect":"Sac suspect",
+            "consommation":"Consommation sans payer","vol_caisse":"Vol dans la caisse",
+            "vol_etalage":"Vol à l'étalage","vol_a_la_tire":"Vol à la tire",
+            "agression":"Agression / violence",
+        }
+        label = type_labels.get(alert_type, alert_type or "Alerte")
+        titre = f"🚨 {label}"
+        corps = f"Caméra : {camera_nom}" if camera_nom else "Nouvelle alerte détectée"
+        threading.Thread(target=envoyer_push_notifications,
+                         args=(client["id"], titre, corps, {"alert_id":data.get("alert_id")}),
+                         daemon=True).start()
+    except Exception: pass
+    return jsonify({"ok":True})
 
 # =================================================================
 # HELPERS JWT (app mobile)
@@ -1126,7 +1217,7 @@ def api_mobile_alertes():
     if not client_id: return jsonify({"error":"Authentification requise"}),401
     limit = min(int(request.args.get("limit", 50)), 200)
     conn = get_db(); cur = conn.cursor()
-    cur.execute("""SELECT alert_id,type,camera,date,heure,image_path,feedback,suspect_id,nb_personnes
+    cur.execute("""SELECT alert_id,type,camera,date,heure,image_path,video_url,feedback,suspect_id,nb_personnes
         FROM alertes_centrales WHERE client_id=%s ORDER BY date DESC,heure DESC LIMIT %s""", (client_id, limit))
     alertes = [dict(a) for a in cur.fetchall()]
     cur.execute("SELECT COUNT(*) as n FROM alertes_centrales WHERE client_id=%s AND date=CURRENT_DATE::TEXT", (client_id,))
@@ -1146,10 +1237,103 @@ def api_mobile_status():
     if not client_id: return jsonify({"error":"Authentification requise"}),401
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT statut,cameras_actives,nb_cameras,last_seen FROM installations WHERE client_id=%s", (client_id,))
-    row = cur.fetchone(); cur.close(); conn.close()
-    if not row: return jsonify({"ok":True,"pc_statut":"offline","cameras_actives":0,"nb_cameras":0,"last_seen":""})
+    row = cur.fetchone()
+    cur.execute("SELECT COUNT(*) as n FROM alertes_centrales WHERE client_id=%s AND date=CURRENT_DATE::TEXT", (client_id,))
+    today = cur.fetchone()
+    cur.close(); conn.close()
+    alertes_today = today["n"] if today else 0
+    if not row: return jsonify({"ok":True,"pc_statut":"offline","cameras_actives":0,"nb_cameras":0,"last_seen":"","alertes_today":alertes_today})
     return jsonify({"ok":True,"pc_statut":row["statut"] or "offline","cameras_actives":row["cameras_actives"] or 0,
-                    "nb_cameras":row["nb_cameras"] or 0,"last_seen":row["last_seen"] or ""})
+                    "nb_cameras":row["nb_cameras"] or 0,"last_seen":row["last_seen"] or "",
+                    "alertes_today":alertes_today})
+
+
+@app.route("/api/mobile/video-request/<alert_id>", methods=["GET"])
+@limiter.limit("30 per minute")
+def api_mobile_video_request(alert_id):
+    """Retourne l'URL publique de la vidéo d'une alerte (ou déclenche l'upload depuis le PC)."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT video_url, video_data FROM alertes_centrales WHERE alert_id=%s AND client_id=%s",
+                (alert_id, client_id))
+    row = cur.fetchone(); cur.close(); conn.close()
+    if not row: return jsonify({"error":"Alerte introuvable"}),404
+    # Si la vidéo est déjà stockée côté backoffice, retourner l'URL publique
+    video_url = row.get("video_url","")
+    if video_url and video_url.startswith("https://backoffice.radaria.fr"):
+        return jsonify({"ok":True,"video_url":video_url,"status":"ready"})
+    # Sinon : la vidéo est sur le PC local — signaler qu'elle est en attente d'upload
+    # Le PC va la push via /api/video-upload dans les prochaines secondes
+    return jsonify({"ok":True,"video_url":None,"status":"pending",
+                    "message":"Vidéo en cours de chargement depuis le PC..."})
+
+# Credentials OVH FTP (stockage permanent pour les clips vidéo)
+OVH_FTP_HOST = "ftp.cluster100.hosting.ovh.net"
+OVH_FTP_USER = "radariv"
+OVH_FTP_PASS = "RadariaFTP2026"
+
+def _upload_clip_ovh(video_bytes, client_id, fname):
+    """Upload un clip vidéo vers OVH via FTP. Retourne l'URL publique ou None."""
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(OVH_FTP_HOST, 21, timeout=60)
+        ftp.login(OVH_FTP_USER, OVH_FTP_PASS)
+        ftp.set_pasv(True)
+        # Créer les dossiers si nécessaire
+        for folder in ["/www/clips", f"/www/clips/{client_id}"]:
+            try:
+                ftp.mkd(folder)
+            except ftplib.error_perm:
+                pass  # dossier déjà existant
+        ftp.cwd(f"/www/clips/{client_id}")
+        ftp.storbinary(f"STOR {fname}", io.BytesIO(video_bytes))
+        ftp.quit()
+        return f"https://radaria.fr/clips/{client_id}/{fname}"
+    except Exception as e:
+        app.logger.warning(f"OVH FTP upload error: {e}")
+        return None
+
+@app.route("/api/video-upload", methods=["POST"])
+def api_video_upload():
+    """Le PC surveillance uploade un clip vidéo pour le rendre accessible hors WiFi."""
+    data = request.get_json(silent=True) or {}
+    key = data.get("license_key","")
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT id FROM clients WHERE license_key=%s AND statut='actif'", (key,))
+    client = cur.fetchone()
+    if not client: cur.close(); conn.close(); return jsonify({"error":"License invalide"}),403
+    alert_id = data.get("alert_id","")
+    video_b64 = data.get("video_b64","")
+    if not alert_id or not video_b64:
+        cur.close(); conn.close()
+        return jsonify({"error":"alert_id et video_b64 requis"}),400
+    try:
+        video_bytes = base64.b64decode(video_b64)
+        client_id = client["id"]
+        fname = f"{alert_id}.mp4"
+        # Upload vers OVH (stockage permanent — ne disparaît pas au redémarrage Railway)
+        public_url = _upload_clip_ovh(video_bytes, client_id, fname)
+        if not public_url:
+            # Fallback : stocker localement (temporaire, mais mieux que rien)
+            clips_dir = Path("clips") / str(client_id)
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            (clips_dir / fname).write_bytes(video_bytes)
+            public_url = f"https://backoffice.radaria.fr/clips/{client_id}/{fname}"
+        cur.execute("UPDATE alertes_centrales SET video_stored_url=%s WHERE alert_id=%s AND client_id=%s",
+                    (public_url, alert_id, client_id))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok":True,"video_url":public_url})
+    except Exception as e:
+        cur.close(); conn.close()
+        return jsonify({"error":str(e)}),500
+
+@app.route("/clips/<int:client_id>/<path:filename>")
+def servir_clip(client_id, filename):
+    """Sert les clips vidéo stockés côté backoffice."""
+    clips_dir = Path("clips") / str(client_id)
+    return send_from_directory(clips_dir, filename)
 
 @app.route("/api/snapshot", methods=["POST"])
 def api_snapshot():
@@ -1270,6 +1454,206 @@ def api_mobile_sinistres():
     cur.close(); conn.close()
     return jsonify({"ok":True,"sinistres":sinistres})
 
+@app.route("/api/mobile/feedback", methods=["POST"])
+@limiter.limit("60 per minute")
+def api_mobile_feedback():
+    """Enregistre le feedback (confirme / faux_positif) sur une alerte."""
+    data = request.get_json(silent=True) or {}
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    alert_id = data.get("alert_id")
+    feedback  = data.get("feedback","")  # "confirme" ou "faux_positif"
+    if not alert_id or feedback not in ("confirme","faux_positif"):
+        return jsonify({"error":"Paramètres invalides"}),400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""UPDATE alertes_centrales SET feedback=%s
+                   WHERE alert_id=%s AND client_id=%s""",
+                (feedback, alert_id, client_id))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok":True})
+
+@app.route("/api/mobile/push-token", methods=["POST"])
+@limiter.limit("30 per minute")
+def api_mobile_push_token():
+    """Enregistre le push token Expo pour les notifications."""
+    data = request.get_json(silent=True) or {}
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    token    = data.get("token","").strip()
+    platform = data.get("platform","ios")
+    if not token: return jsonify({"error":"Token manquant"}),400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO push_tokens (client_id,token,platform,updated_at)
+                   VALUES (%s,%s,%s,NOW())
+                   ON CONFLICT (token) DO UPDATE SET client_id=%s, updated_at=NOW()""",
+                (client_id, token, platform, client_id))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok":True})
+
+@app.route("/api/mobile/snapshots", methods=["GET"])
+@limiter.limit("60 per minute")
+def api_mobile_snapshots():
+    """Retourne le dernier snapshot (base64) par caméra pour l'app mobile."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    snap_dir = SNAP_DIR / str(client_id)
+    if not snap_dir.exists():
+        return jsonify({"ok":True,"snapshots":[]})
+    # Grouper fichiers par caméra et garder le plus récent
+    cam_latest = {}  # cam_name -> (path, mtime)
+    for f in snap_dir.iterdir():
+        if not f.name.endswith('.jpg'):
+            continue
+        # Format: YYYYMMDD_HHMMSS_camname.jpg  (ts = 15 chars, puis _)
+        if len(f.name) < 17:
+            continue
+        cam_key = f.name[16:-4].replace('_', ' ')  # nom caméra lisible
+        mtime = f.stat().st_mtime
+        if cam_key not in cam_latest or mtime > cam_latest[cam_key][1]:
+            cam_latest[cam_key] = (f, mtime)
+    snapshots = []
+    for cam_name, (fpath, mtime) in cam_latest.items():
+        try:
+            img_b64 = base64.b64encode(fpath.read_bytes()).decode()
+            snapshots.append({
+                "camera": cam_name,
+                "image_b64": img_b64,
+                "ts": datetime.fromtimestamp(mtime).strftime("%H:%M:%S"),
+            })
+        except Exception:
+            pass
+    return jsonify({"ok":True,"snapshots":snapshots})
+
+@app.route("/api/mobile/clips", methods=["GET"])
+@limiter.limit("60 per minute")
+def api_mobile_clips():
+    """Retourne les alertes ayant une vidéo enregistrée."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""SELECT alert_id,type,camera,date,heure,
+                   COALESCE(NULLIF(video_stored_url,''), video_url) AS video_url,
+                   feedback
+                   FROM alertes_centrales
+                   WHERE client_id=%s
+                     AND (video_url IS NOT NULL AND video_url != ''
+                       OR video_stored_url IS NOT NULL AND video_stored_url != '')
+                   ORDER BY date DESC,heure DESC LIMIT 100""", (client_id,))
+    clips = [dict(c) for c in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify({"ok":True,"clips":clips})
+
+@app.route("/api/mobile/cameras", methods=["GET"])
+@limiter.limit("60 per minute")
+def api_mobile_cameras():
+    """Retourne la config par caméra (gestes + seuils IA) pour l'app mobile.
+    Priorité : vrais noms depuis config_json du client (= noms utilisés par surveillance.py).
+    Fallback : ce qui est en BDD camera_config.
+    """
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+
+    # 1) Config déjà sauvegardée en BDD (keyed par camera_name)
+    cur.execute(
+        "SELECT camera_name,active,gestes_json,confidence_min,cooldown_min,alertes_max_jour "
+        "FROM camera_config WHERE magasin_id=%s", (client_id,)
+    )
+    cam_map = {}
+    for r in cur.fetchall():
+        try: gestes = json.loads(r["gestes_json"] or "{}")
+        except Exception: gestes = {}
+        cam_map[r["camera_name"]] = {
+            "camera_name": r["camera_name"], "active": bool(r["active"]),
+            "gestes": gestes, "confidence_min": r["confidence_min"],
+            "cooldown_min": r["cooldown_min"], "alertes_max_jour": r["alertes_max_jour"],
+        }
+
+    # 2) Liste réelle des caméras depuis config_json du client
+    cur.execute("SELECT config_json FROM clients WHERE id=%s", (client_id,))
+    row = cur.fetchone(); cur.close(); conn.close()
+    config_json_str = (row["config_json"] if row else "") or ""
+    try:
+        cfg = json.loads(config_json_str) if config_json_str.strip() else {}
+        cam_list = cfg.get("cameras", [])
+    except Exception:
+        cam_list = []
+
+    DEFAULT_GESTES = {
+        "mouvement_rapide": True, "posture_basse": True, "presence_longue": True,
+        "sac_suspect": True, "consommation": True, "vol_caisse": True,
+        "vol_etalage": True, "vol_a_la_tire": True, "agression": True,
+    }
+
+    cameras = []
+    if cam_list:
+        # Utiliser les vrais noms (= noms que surveillance.py utilise via self.nom)
+        for cam in cam_list:
+            nom = cam.get("nom") or cam.get("name") or f"Camera {cam.get('index', cam.get('id','?'))}"
+            if nom in cam_map:
+                cameras.append(cam_map[nom])
+            else:
+                cameras.append({
+                    "camera_name": nom, "active": True,
+                    "gestes": dict(DEFAULT_GESTES),
+                    "confidence_min": 0.65, "cooldown_min": 5, "alertes_max_jour": 20,
+                })
+    else:
+        # Fallback : retourner ce qui est en BDD
+        cameras = sorted(cam_map.values(), key=lambda x: x["camera_name"])
+
+    return jsonify({"ok":True,"cameras":cameras,"global_ia":{"confidence_min":0.65,"cooldown_min":5,"alertes_max_jour":20}})
+
+@app.route("/api/mobile/config-gestes", methods=["POST"])
+@limiter.limit("30 per minute")
+def api_mobile_config_gestes():
+    """Sauvegarde la config gestes/IA par caméra depuis l'app mobile."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    data = request.get_json() or {}
+    cameras = data.get("cameras", [])
+    global_ia = data.get("global_ia", {})
+    conn = get_db(); cur = conn.cursor()
+    for cam in cameras:
+        cam_name = (cam.get("camera_name") or "").strip()
+        if not cam_name: continue
+        active   = bool(cam.get("active", True))
+        gestes_j = json.dumps(cam.get("gestes", {}))
+        conf_min = cam.get("confidence_min", global_ia.get("confidence_min", 0.65))
+        cooldown = cam.get("cooldown_min",   global_ia.get("cooldown_min",   5))
+        max_jour = cam.get("alertes_max_jour", global_ia.get("alertes_max_jour", 20))
+        cur.execute("""
+            INSERT INTO camera_config
+                (magasin_id,camera_name,active,gestes_json,confidence_min,cooldown_min,alertes_max_jour,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT(magasin_id,camera_name) DO UPDATE SET
+                active=%s,gestes_json=%s,confidence_min=%s,cooldown_min=%s,alertes_max_jour=%s,updated_at=NOW()
+        """, (client_id,cam_name,active,gestes_j,conf_min,cooldown,max_jour,
+              active,gestes_j,conf_min,cooldown,max_jour))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok":True,"message":f"{len(cameras)} caméra(s) configurée(s)"})
+
+def envoyer_push_notifications(client_id, titre, corps, data_extra=None):
+    """Envoie une notification push Expo à tous les tokens du client."""
+    try:
+        import urllib.request, json as _json
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT token FROM push_tokens WHERE client_id=%s", (client_id,))
+        tokens = [r["token"] for r in cur.fetchall()]
+        cur.close(); conn.close()
+        if not tokens: return
+        messages = [{"to":t,"title":titre,"body":corps,"sound":"default",
+                     "data":data_extra or {}} for t in tokens]
+        payload = _json.dumps(messages).encode()
+        req = urllib.request.Request(
+            "https://exp.host/--/api/v2/push/send",
+            data=payload,
+            headers={"Content-Type":"application/json","Accept":"application/json"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[PUSH] Erreur envoi notifications: {e}")
+
 # =================================================================
 # AGENTS PC — Supervision des gardiens clients
 # =================================================================
@@ -1290,15 +1674,25 @@ def api_agent_status():
         return jsonify({"ok": False, "error": "license_key manquante"}), 400
     client_id = _agent_client_id(lk)
     conn = get_db(); cur = conn.cursor()
-    # Upsert sur (license_key, hostname)
     hostname = data.get("hostname","")
+    # Vrai UPSERT : 1 seule ligne par (license_key, hostname)
     cur.execute("""
         INSERT INTO agents_pc
             (client_id, license_key, hostname, agent_version,
              surveillance_active, cameras_ok, cameras_total,
              disk_libre_gb, backoffice_ms, reseau_ok, last_seen, statut)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),'online')
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (license_key, hostname) DO UPDATE SET
+            client_id           = EXCLUDED.client_id,
+            surveillance_active = EXCLUDED.surveillance_active,
+            cameras_ok          = EXCLUDED.cameras_ok,
+            cameras_total       = EXCLUDED.cameras_total,
+            disk_libre_gb       = EXCLUDED.disk_libre_gb,
+            backoffice_ms       = EXCLUDED.backoffice_ms,
+            reseau_ok           = EXCLUDED.reseau_ok,
+            last_seen           = NOW(),
+            statut              = 'online',
+            agent_version       = EXCLUDED.agent_version
     """, (client_id, lk, hostname,
           data.get("agent_version","1.0"),
           data.get("surveillance_active", False),
@@ -1307,17 +1701,6 @@ def api_agent_status():
           data.get("disk_libre_gb"),
           data.get("backoffice_ms"),
           data.get("reseau_ok", True)))
-    cur.execute("""
-        UPDATE agents_pc SET
-            surveillance_active=%s, cameras_ok=%s, cameras_total=%s,
-            disk_libre_gb=%s, backoffice_ms=%s, reseau_ok=%s,
-            last_seen=NOW(), statut='online', agent_version=%s
-        WHERE license_key=%s AND hostname=%s
-    """, (data.get("surveillance_active", False),
-          data.get("cameras_ok", 0), data.get("cameras_total", 0),
-          data.get("disk_libre_gb"), data.get("backoffice_ms"),
-          data.get("reseau_ok", True), data.get("agent_version","1.0"),
-          lk, hostname))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True})
 
@@ -1433,26 +1816,4 @@ def supervision_agents():
     # Incidents non lus
     cur.execute("""
         SELECT i.*, c.nom_magasin FROM agents_incidents i
-        LEFT JOIN clients c ON c.id=i.client_id
-        WHERE i.lu=FALSE ORDER BY i.created_at DESC LIMIT 50
-    """)
-    incidents = [dict(r) for r in cur.fetchall()]
-    # Marquer comme lus
-    cur.execute("UPDATE agents_incidents SET lu=TRUE WHERE lu=FALSE")
-    cur.execute("SELECT * FROM clients ORDER BY nom_magasin")
-    clients_list = [dict(c) for c in cur.fetchall()]
-    conn.commit(); cur.close(); conn.close()
-
-    # Calculer statut visuel
-    for a in agents:
-        mins = float(a.get("minutes_inactif") or 999)
-        a["statut_visuel"] = "online" if mins < 10 else ("warn" if mins < 60 else "offline")
-        a["last_seen_str"] = str(a.get("last_seen",""))[:16]
-
-    for i in incidents:
-        i["created_at_str"] = str(i.get("created_at",""))[:16]
-
-    return render_template("agents.html",
-                           agents=agents, incidents=incidents,
-                           clients_list=clients_list,
-                           nb_inci
+        L
