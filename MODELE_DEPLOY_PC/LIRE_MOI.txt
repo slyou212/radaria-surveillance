@@ -1,0 +1,41 @@
+=====================================================
+  RadarIA — Modèle déploiement PC client
+  À utiliser pour CHAQUE nouveau PC client
+=====================================================
+
+UTILISATION :
+--------------
+1. Double-clic sur CREER_PACKAGE_CLIENT.bat
+2. Répondre aux questions (nom client, license_key, NVR...)
+3. Un ZIP est généré dans packages_generes\
+4. Copier ce ZIP sur le nouveau PC et extraire
+5. Lancer NOUVEAU_PC\SETUP_RADARIA.bat sur le nouveau PC
+
+CONTENU DU ZIP GÉNÉRÉ :
+------------------------
+  NOUVEAU_PC\
+    SETUP_RADARIA.bat       ← Lancer en 1er sur le nouveau PC
+    LANCER_SURVEILLANCE.bat
+    DEMARRAGE_AUTO.bat
+    verifier_systeme.py
+    BRIEFING_CLAUDE.md      ← Donner à Claude sur le nouveau PC
+    config.json             ← Pré-rempli automatiquement
+  RadarIA_PC\
+    surveillance.py         ← Code de surveillance
+    yolov8n.pt              ← Modèle IA (détection personnes)
+    config.json             ← Identique au précédent
+    templates\
+      dashboard.html
+      historique.html
+      visiteurs.html
+
+MISE À JOUR DU MODÈLE :
+-------------------------
+Si surveillance.py ou yolov8n.pt changent sur le PC principal :
+  → Copier le nouveau fichier dans _template\RadarIA_PC\
+  → Tous les prochains packages incluront la version à jour
+
+=====================================================
+  IMPORTANT : Ne jamais modifier _template\ directement
+  Utiliser CREER_PACKAGE_CLIENT.bat pour générer un ZIP
+=====================================================

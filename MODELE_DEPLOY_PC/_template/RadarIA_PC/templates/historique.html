@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Historique alertes — RadarIA</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a0a; color:#eee; font-family:'Segoe UI',Arial,sans-serif; }
+.header { background:#111; padding:14px 20px; display:flex; align-items:center; gap:15px; border-bottom:2px solid #e74c3c; }
+.header h1 { color:#e74c3c; font-size:1.1em; font-weight:800; }
+.nav a { color:#888; text-decoration:none; font-size:.85em; padding:6px 12px; border-radius:6px; border:1px solid #222; }
+.nav a:hover { color:#fff; border-color:#555; }
+.filters { background:#111; padding:14px 20px; border-bottom:1px solid #1a1a1a; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.filters input, .filters select { background:#0a0a0a; border:1px solid #222; border-radius:8px; padding:7px 12px; color:#eee; font-size:.85em; }
+.filters input:focus, .filters select:focus { outline:none; border-color:#e74c3c; }
+.filters button { background:#e74c3c; border:none; border-radius:8px; padding:7px 16px; color:#fff; font-size:.85em; cursor:pointer; font-weight:600; }
+.filters button.reset { background:transparent; border:1px solid #333; color:#888; }
+.count { padding:10px 20px; color:#555; font-size:.82em; }
+.table-wrap { overflow-x:auto; padding:0 12px 20px; }
+table { width:100%; border-collapse:collapse; font-size:.85em; }
+thead tr { background:#111; }
+th { padding:10px 12px; text-align:left; color:#555; font-weight:600; border-bottom:1px solid #1a1a1a; }
+td { padding:10px 12px; border-bottom:1px solid #0f0f0f; vertical-align:middle; }
+tr:hover td { background:#111; }
+.badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:.8em; font-weight:600; }
+.badge-rouge { background:#3a0a0a; color:#e74c3c; }
+.badge-orange { background:#2a1500; color:#e67e22; }
+.badge-violet { background:#1a0a2a; color:#9b59b6; }
+.badge-vert { background:#0a2a0a; color:#2ecc71; }
+.badge-gray { background:#1a1a1a; color:#666; }
+.fb-btns { display:flex; gap:4px; }
+.fb-btn { background:none; border:1px solid #222; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:1em; opacity:.4; transition:.2s; }
+.fb-btn:hover, .fb-btn.active { opacity:1; }
+.img-thumb { width:60px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer; border:1px solid #222; }
+.empty { text-align:center; padding:40px; color:#333; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📋 Historique des alertes</h1>
+  <nav class="nav" style="margin-left:auto">
+    <a href="/">← Dashboard</a>
+  </nav>
+</div>
+
+<div class="filters">
+  <input type="date" id="f-date" placeholder="Date">
+  <select id="f-camera">
+    <option value="">Toutes les caméras</option>
+    {% for c in cameras %}<option>{{ c }}</option>{% endfor %}
+  </select>
+  <select id="f-type">
+    <option value="">Tous les types</option>
+    <option value="presence_longue">Présence longue</option>
+    <option value="mouvement_rapide">Mouvement rapide</option>
+    <option value="posture_basse">Posture suspecte</option>
+  </select>
+  <button onclick="charger()">🔍 Filtrer</button>
+  <button class="reset" onclick="resetFiltres()">✕ Réinitialiser</button>
+  <span id="export-btn" style="margin-left:auto">
+    <button onclick="exportCSV()" style="background:#1a1a3a;border:1px solid #333;color:#888;border-radius:8px;padding:7px 14px;font-size:.82em;cursor:pointer">⬇ Export CSV</button>
+  </span>
+</div>
+
+<div class="count" id="count">Chargement...</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th>Heure</th><th>Type</th><th>Caméra</th><th>Média</th><th>Feedback</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">Aucune alerte trouvée</div>
+</div>
+
+<!-- Modale vidéo/image -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;justify-content:center;align-items:center">
+  <div style="background:#111;border-radius:16px;padding:20px;max-width:800px;width:90%;position:relative">
+    <button onclick="fermerModal()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#fff;font-size:1.4em;cursor:pointer">✕</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+let allData = [];
+const TYPES = { presence_longue:'Présence longue', mouvement_rapide:'Mouvement rapide', posture_basse:'Posture suspecte' };
+const COLORS = { presence_longue:'badge-orange', mouvement_rapide:'badge-rouge', posture_basse:'badge-violet' };
+
+function charger() {
+  const params = new URLSearchParams();
+  const d = document.getElementById('f-date').value;
+  const c = document.getElementById('f-camera').value;
+  const t = document.getElementById('f-type').value;
+  if (d) params.set('date', d);
+  if (c) params.set('camera', c);
+  if (t) params.set('type', t);
+  fetch('/api/alertes?' + params).then(r => r.json()).then(data => {
+    allData = data;
+    afficher(data);
+  });
+}
+
+function afficher(data) {
+  document.getElementById('count').textContent = `${data.length} alerte(s) trouvée(s)`;
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('empty');
+  if (!data.length) { tbody.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = data.map(a => {
+    const fb = a.feedback || '';
+    const cls = COLORS[a.type] || 'badge-gray';
+    return `<tr>
+      <td style="font-family:monospace;color:#666">${a.date||''}</td>
+      <td style="font-family:monospace;color:#888">${a.heure||''}</td>
+      <td><span class="badge ${cls}">${TYPES[a.type]||a.type}</span></td>
+      <td style="color:#3498db">${a.camera||''}</td>
+      <td>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${a.image ? `<img class="img-thumb" src="/alertes/${a.image}" onclick="ouvrirMedia('image','${a.image}')" title="Voir photo">` : ''}
+          ${a.video ? `<button onclick="ouvrirMedia('video','${a.video}')" style="background:#1a1a3a;border:1px solid #333;border-radius:6px;padding:4px 10px;color:#fff;cursor:pointer;font-size:.85em">▶ Vidéo</button>` : ''}
+          ${!a.image && !a.video ? '—' : ''}
+        </div>
+      </td>
+      <td>
+        <div class="fb-btns">
+          <button class="fb-btn ${fb==='ok'?'active':''}" onclick="feedback('${a.id}','ok')">✅</button>
+          <button class="fb-btn ${fb==='faux'?'active':''}" onclick="feedback('${a.id}','faux')">❌</button>
+          ${fb ? `<span style="color:#555;font-size:.8em;margin-left:4px">${fb==='ok'?'Justifiée':'Fausse alerte'}</span>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function feedback(id, val) {
+  fetch(`/api/alerte/feedback/${id}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({feedback: val})
+  }).then(() => charger());
+}
+
+function resetFiltres() {
+  document.getElementById('f-date').value = '';
+  document.getElementById('f-camera').value = '';
+  document.getElementById('f-type').value = '';
+  charger();
+}
+
+function exportCSV() {
+  const rows = [['Date','Heure','Type','Caméra','Feedback']];
+  allData.forEach(a => rows.push([a.date, a.heure, a.type, a.camera, a.feedback||'']));
+  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `alertes_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+function ouvrirModal() {
+  const m = document.getElementById('modal');
+  m.style.display = 'flex';
+}
+function fermerModal() {
+  document.getElementById('modal').style.display = 'none';
+  document.getElementById('modal-content').innerHTML = '';
+}
+function ouvrirMedia(type, nom) {
+  const c = document.getElementById('modal-content');
+  if (type === 'video') {
+    c.innerHTML = `<video controls autoplay style="width:100%;border-radius:8px;max-height:500px">
+      <source src="/videos/${nom}" type="video/mp4">
+    </video>
+    <div style="margin-top:12px;color:#666;font-size:.85em">📹 ${nom}</div>`;
+  } else {
+    c.innerHTML = `<img src="/alertes/${nom}" style="width:100%;border-radius:8px;max-height:500px;object-fit:contain">`;
+  }
+  ouvrirModal();
+}
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) fermerModal();
+});
+
+// Date du jour par défaut
+document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+charger();
+</script>
+</body>
+</html>

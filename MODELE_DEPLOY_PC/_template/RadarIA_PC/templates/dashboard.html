@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RadarIA — Surveillance</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html { font-size: clamp(10px, 1.1vw, 16px); }
+body { height:100vh; overflow:hidden; background:#0a0a0a; color:#eee; font-family:'Segoe UI',Arial,sans-serif; }
+
+/* ── HEADER ── */
+.header {
+  background:#111; padding:0 1.2em;
+  display:flex; align-items:center; gap:.9em;
+  border-bottom:2px solid #e74c3c; height:3.2em; flex-shrink:0;
+}
+.logo { color:#e74c3c; font-size:1.15em; font-weight:900; letter-spacing:.04em; }
+.logo span { color:#fff; }
+.tagline { color:#444; font-size:.72em; }
+.dot { width:.55em; height:.55em; border-radius:50%; background:#2ecc71; animation:pulse 2s infinite; flex-shrink:0; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.nav { margin-left:auto; display:flex; gap:.4em; align-items:center; }
+.nav a, .nav button {
+  color:#888; text-decoration:none; font-size:.78em; padding:.3em .8em;
+  border-radius:.4em; border:1px solid #222; background:none; cursor:pointer; white-space:nowrap; transition:.15s;
+}
+.nav a:hover { color:#e74c3c; border-color:#e74c3c; }
+.nav .btn-deco { color:#e74c3c; border-color:#e74c3c; }
+.nav .btn-deco:hover { background:#e74c3c; color:#fff; }
+.horloge { color:#555; font-size:.82em; font-family:monospace; white-space:nowrap; }
+
+/* ── LAYOUT PRINCIPAL ── */
+.layout { display:flex; flex-direction:column; height:calc(100vh - 3.2em); }
+
+/* ── CAMÉRAS (haut) ── */
+.cameras-section { flex:0 0 45vh; padding:.4em .4em 0; min-height:0; }
+.cameras-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:.4em; height:100%; }
+.cam { background:#111; border-radius:.5em; overflow:hidden; border:1px solid #1a1a1a; display:flex; flex-direction:column; }
+.cam-hdr { background:#1a1a1a; padding:.3em .6em; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
+.cam-nom { color:#e74c3c; font-weight:700; font-size:.78em; }
+.cam-live { color:#2ecc71; font-size:.68em; }
+.cam img { width:100%; flex:1; object-fit:cover; display:block; min-height:0; }
+
+/* ── STATS ── */
+.stats { display:flex; gap:.4em; padding:.4em .4em; flex-shrink:0; }
+.stat { flex:1; background:#111; border-radius:.5em; padding:.4em .6em; border:1px solid #1a1a1a; text-align:center; }
+.stat-v { font-size:1.1em; font-weight:800; color:#e74c3c; }
+.stat-v.g { color:#2ecc71; }
+.stat-v.o { color:#e67e22; }
+.stat-l { font-size:.67em; color:#555; }
+
+/* ── PANNEAU IA ── */
+.ia-panel { background:#111; border-top:1px solid #1a1a1a; padding:.5em .9em; flex-shrink:0; }
+.ia-panel-titre { font-size:.72em; color:#555; margin-bottom:.4em; display:flex; align-items:center; gap:.5em; }
+.ia-types { display:flex; gap:.5em; flex-wrap:wrap; }
+.ia-type { display:flex; align-items:center; gap:.35em; background:#1a1a1a; border-radius:.4em; padding:.3em .6em; font-size:.72em; border:1px solid #222; cursor:pointer; }
+.ia-type:hover { border-color:#444; }
+.ia-type .ia-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.ia-dot.actif   { background:#2ecc71; }
+.ia-dot.prudent { background:#f39c12; }
+.ia-dot.silence { background:#e74c3c; }
+.ia-type .ia-nom  { color:#aaa; }
+.ia-type .ia-stat { color:#555; font-size:.9em; }
+
+/* ── ALERTES (bas) ── */
+.alertes-section { flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid #1a1a1a; }
+.alertes-hdr {
+  padding:.4em .9em; background:#111; border-bottom:1px solid #1a1a1a;
+  display:flex; align-items:center; flex-shrink:0; gap:.6em; flex-wrap:wrap;
+}
+.alertes-hdr h2 { color:#e74c3c; font-size:.88em; white-space:nowrap; }
+.alertes-hdr a { color:#555; font-size:.75em; text-decoration:none; white-space:nowrap; margin-left:auto; }
+.alertes-hdr a:hover { color:#e74c3c; }
+.filtres { display:flex; gap:.4em; align-items:center; }
+.filtres input, .filtres select {
+  background:#0d0d0d; border:1px solid #222; border-radius:.35em;
+  padding:.2em .5em; color:#ccc; font-size:.74em; height:1.8em;
+}
+.filtres input:focus, .filtres select:focus { outline:none; border-color:#e74c3c; }
+.filtres button {
+  background:#1a1a1a; border:1px solid #333; border-radius:.35em;
+  padding:.2em .6em; color:#777; font-size:.74em; cursor:pointer; height:1.8em;
+}
+.filtres button:hover { border-color:#e74c3c; color:#e74c3c; }
+.nb-res { color:#333; font-size:.72em; white-space:nowrap; }
+
+.alertes-list { flex:1; overflow-y:auto; }
+.alertes-list::-webkit-scrollbar { width:.3em; }
+.alertes-list::-webkit-scrollbar-thumb { background:#222; border-radius:.2em; }
+
+/* Rangée alerte compacte */
+.alerte-row {
+  display:flex; align-items:center; gap:.6em;
+  padding:.45em .9em; border-bottom:1px solid #0f0f0f;
+  border-left:3px solid transparent;
+  transition:background .2s, border-color .2s;
+}
+.alerte-row:hover { background:#111; }
+/* États confirmés — toute la ligne change */
+.alerte-row.fb-vol  { background:#0d1f0d; border-left-color:#2ecc71; }
+.alerte-row.fb-faux { background:#111; border-left-color:#555; opacity:.65; }
+
+.a-heure { color:#555; font-family:monospace; font-size:.78em; white-space:nowrap; flex-shrink:0; }
+.a-date  { color:#333; font-size:.72em; font-family:monospace; white-space:nowrap; flex-shrink:0; }
+.a-cam   { color:#3498db; font-size:.8em; font-weight:600; min-width:6em; max-width:9em; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; flex-shrink:0; }
+.a-type  { font-size:.72em; padding:.15em .45em; border-radius:.3em; white-space:nowrap; flex-shrink:0; }
+.t-dissimulation    { background:#2a1500; color:#e67e22; }
+.t-mouvement_rapide { background:#2a0a0a; color:#e74c3c; }
+.t-posture_basse,.t-objet_cache { background:#1a0a2a; color:#9b59b6; }
+.t-sac_suspect  { background:#1a1200; color:#f39c12; }
+.t-consommation { background:#001a1a; color:#1abc9c; }
+
+.a-btns { display:flex; gap:.4em; margin-left:auto; flex-shrink:0; align-items:center; }
+.btn-v  { background:#1a1a3a; border:1px solid #333; border-radius:.4em; padding:.3em .7em; color:#aaa; font-size:.76em; cursor:pointer; }
+.btn-v:hover { background:#2a2a5a; color:#fff; }
+
+/* Boutons feedback — plus grands, plus lisibles */
+.btn-vol  { background:none; border:2px solid #2ecc71; border-radius:.4em; padding:.3em .85em; color:#2ecc71; font-size:.78em; font-weight:600; cursor:pointer; transition:.15s; }
+.btn-vol:hover { background:#0d2a0d; }
+.btn-faux { background:none; border:2px solid #e74c3c; border-radius:.4em; padding:.3em .85em; color:#e74c3c; font-size:.78em; font-weight:600; cursor:pointer; transition:.15s; }
+.btn-faux:hover { background:#2a0a0a; }
+
+/* Badge après confirmation — remplace les deux boutons */
+.fb-badge {
+  font-size:.78em; font-weight:800; padding:.3em .9em;
+  border-radius:.4em; white-space:nowrap; letter-spacing:.03em;
+}
+.fb-badge.vol  { background:#2ecc71; color:#000; }
+.fb-badge.faux { background:#333; color:#888; border:1px solid #444; }
+.vide { padding:1.5em; text-align:center; color:#333; font-size:.88em; }
+
+/* ── MODALE VIDÉO ── */
+#modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:999; justify-content:center; align-items:center; }
+.modal-box { background:#111; border-radius:1em; padding:1.2em; width:92%; max-width:820px; position:relative; border:1px solid #222; }
+.modal-close { position:absolute; top:.7em; right:.9em; background:none; border:none; color:#fff; font-size:1.4em; cursor:pointer; opacity:.7; }
+.modal-close:hover { opacity:1; }
+.modal-titre { color:#666; font-size:.82em; margin-bottom:.7em; font-family:monospace; }
+
+/* ── MODALE DÉCONNEXION ── */
+#modal-deco { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:1000; justify-content:center; align-items:center; }
+.deco-box { background:#111; border-radius:1.1em; padding:2em; width:18em; text-align:center; border:1px solid #e74c3c; }
+.deco-box h3 { color:#e74c3c; margin-bottom:.7em; }
+.deco-box p { color:#777; font-size:.86em; margin-bottom:1.5em; line-height:1.5; }
+.deco-btns { display:flex; gap:.7em; justify-content:center; }
+.deco-ok { background:#e74c3c; border:none; border-radius:.55em; padding:.6em 1.3em; color:#fff; font-weight:700; cursor:pointer; }
+.deco-ok:hover { background:#c0392b; }
+.deco-annuler { background:none; border:1px solid #333; border-radius:.55em; padding:.6em 1em; color:#888; cursor:pointer; }
+.deco-annuler:hover { border-color:#555; color:#fff; }
+
+/* ── TOAST NOTIFICATIONS ── */
+#toast { position:fixed; bottom:1.5em; right:1.5em; z-index:9999; display:flex; flex-direction:column; gap:.5em; pointer-events:none; }
+.toast-msg {
+  padding:.6em 1.2em; border-radius:.55em; font-size:.82em; font-weight:600;
+  max-width:22em; animation: toastIn .2s ease; pointer-events:none;
+  border-left:.25em solid;
+}
+.toast-ok   { background:#0d2a0d; color:#2ecc71; border-color:#2ecc71; }
+.toast-err  { background:#2a0a0a; color:#e74c3c; border-color:#e74c3c; }
+.toast-info { background:#0a1a2a; color:#3498db; border-color:#3498db; }
+@keyframes toastIn { from{opacity:0;transform:translateX(1em)} to{opacity:1;transform:none} }
+
+/* ── STATUT CAMÉRA ── */
+.cam-hdr { position:relative; }
+.cam-statut { font-size:.62em; color:#555; }
+.cam-statut.ok { color:#2ecc71; }
+.cam-statut.ko { color:#e74c3c; }
+
+/* ── MODALE CONFIRMATION FEEDBACK ── */
+#modal-fb { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:2000; justify-content:center; align-items:center; }
+.fb-box { background:#111; border-radius:1.1em; padding:1.8em; width:22em; text-align:center; border:1px solid #333; }
+.fb-box h3 { font-size:1em; margin-bottom:.5em; }
+.fb-box .fb-detail { color:#555; font-size:.8em; margin-bottom:1.4em; line-height:1.6; }
+.fb-btns { display:flex; gap:.7em; justify-content:center; }
+.fb-confirmer { border:none; border-radius:.55em; padding:.65em 1.5em; color:#fff; font-weight:700; cursor:pointer; font-size:.9em; }
+.fb-confirmer.vol  { background:#2ecc71; color:#000; }
+.fb-confirmer.faux { background:#e74c3c; }
+.fb-confirmer:hover { opacity:.85; }
+.fb-annuler { background:none; border:1px solid #333; border-radius:.55em; padding:.65em 1em; color:#666; cursor:pointer; font-size:.9em; }
+.fb-annuler:hover { border-color:#555; color:#aaa; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="dot"></div>
+  <div>
+    <div class="logo">Radar<span>IA</span></div>
+    <div class="tagline">Surveillance Intelligente — Votre commerce sous bonne garde, 24h/24</div>
+  </div>
+  <nav class="nav">
+    <a href="/historique" target="_blank">📋 Historique</a>
+    <a href="/visiteurs" target="_blank">👥 Visiteurs</a>
+    <button class="btn-deco" onclick="ouvrirDeco()">🔒 Déconnexion</button>
+  </nav>
+  <span class="horloge" id="h"></span>
+</div>
+
+<div class="layout">
+
+  <!-- CAMÉRAS HAUT -->
+  <div class="cameras-section">
+    <div class="cameras-grid">
+      {% for cam in cameras %}
+      <div class="cam">
+        <div class="cam-hdr">
+          <span class="cam-nom">{{ cam.nom }}</span>
+          <span class="cam-live">● Live</span>
+        </div>
+        <img src="/flux/{{ cam.id }}" alt="{{ cam.nom }}">
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat"><div class="stat-v g" id="s-cams">{{ cameras|length }}</div><div class="stat-l">Caméras</div></div>
+    <div class="stat"><div class="stat-v" id="s-alertes">0</div><div class="stat-l">Alertes auj.</div></div>
+    <div class="stat"><div class="stat-v o" id="s-actifs">0</div><div class="stat-l">Présents</div></div>
+    <div class="stat"><div class="stat-v" id="s-visiteurs">0</div><div class="stat-l">Visiteurs</div></div>
+    <div class="stat"><div class="stat-v" id="s-vols" style="color:#e74c3c">0</div><div class="stat-l">Vols confirmés</div></div>
+    <div class="stat"><div class="stat-v" id="s-faux" style="color:#f39c12">0</div><div class="stat-l">Faux positifs</div></div>
+  </div>
+
+  <!-- PANNEAU APPRENTISSAGE IA -->
+  <div class="ia-panel">
+    <div class="ia-panel-titre">
+      🤖 IA — Statut des détections <span style="color:#333;font-size:.85em">(clic pour forcer actif/silence)</span>
+    </div>
+    <div class="ia-types" id="ia-types">
+      <span style="color:#333;font-size:.8em">Chargement...</span>
+    </div>
+  </div>
+
+  <!-- ALERTES BAS -->
+  <div class="alertes-section">
+    <div class="alertes-hdr">
+      <h2>🚨 Alertes</h2>
+      <div class="filtres">
+        <input type="date" id="f-date" title="Filtrer par date">
+        <select id="f-type">
+          <option value="">Tous types</option>
+          <option value="mouvement_rapide">Mouvement suspect</option>
+          <option value="posture_basse">Posture suspecte</option>
+          <option value="sac_suspect">Sac suspect</option>
+          <option value="consommation">Consommation</option>
+          <option value="dissimulation">Dissimulation</option>
+          <option value="objet_cache">Objet caché</option>
+        </select>
+        <button onclick="resetFiltres()">✕</button>
+      </div>
+      <span class="nb-res" id="nb-res"></span>
+      <a href="/historique" target="_blank">Tout voir →</a>
+    </div>
+    <div class="alertes-list" id="al">
+      <div class="vide">Chargement...</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- TOAST CONTAINER -->
+<div id="toast"></div>
+
+<!-- MODALE CONFIRMATION FEEDBACK -->
+<div id="modal-fb">
+  <div class="fb-box">
+    <h3 id="fb-titre"></h3>
+    <div class="fb-detail" id="fb-detail"></div>
+    <div class="fb-btns">
+      <button class="fb-annuler" onclick="fermerFb()">Annuler</button>
+      <button class="fb-confirmer" id="fb-btn-ok" onclick="confirmerFeedback()"></button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE VIDÉO -->
+<div id="modal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="fermerModal()">✕</button>
+    <div class="modal-titre" id="modal-titre"></div>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<!-- MODALE DÉCONNEXION -->
+<div id="modal-deco">
+  <div class="deco-box">
+    <h3>🔒 Déconnexion</h3>
+    <p>Voulez-vous quitter le dashboard ?<br>La surveillance continue en arrière-plan.</p>
+    <div class="deco-btns">
+      <button class="deco-annuler" onclick="fermerDeco()">Annuler</button>
+      <button class="deco-ok" onclick="seDeconnecter()">Quitter</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const today = new Date().toISOString().split('T')[0];
+const TYPES = {
+  mouvement_rapide:'Mouvement suspect',
+  posture_basse:'Posture suspecte',
+  sac_suspect:'Sac suspect',
+  consommation:'Consommation',
+  dissimulation:'Dissimulation',
+  objet_cache:'Objet cache'
+};
+const EXCLUDED_TYPES = [];
+
+let toutesAlertes = [];
+let feedbacksLocaux = {};  // id → feedback, conservé entre les refresh
+
+// ── TOAST ──
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  const div = document.createElement('div');
+  div.className = 'toast-msg toast-' + (type||'info');
+  div.textContent = msg;
+  el.appendChild(div);
+  setTimeout(() => div.remove(), 3500);
+}
+
+setInterval(() => {
+  document.getElementById('h').textContent = new Date().toLocaleTimeString('fr-FR');
+}, 1000);
+
+// Tableau global pour accès par index depuis les onclick
+window._alertes = [];
+let _fbPending = null; // {idx, val} en attente de confirmation
+
+// ── MODALE CONFIRMATION FEEDBACK ──
+window.doFeedback = function(idx, val) {
+  const a = window._alertes[idx];
+  if (!a) return;
+  const TYPES_FR = {mouvement_rapide:'Mouvement suspect', posture_basse:'Posture suspecte', dissimulation:'Dissimulation', objet_cache:'Objet caché'};
+  const typeLabel = TYPES_FR[a.type] || a.type || 'Alerte';
+  const cam = a.camera || '';
+  const heure = a.heure || '';
+
+  _fbPending = {idx, val};
+
+  const isVol = val === 'ok';
+  document.getElementById('fb-titre').textContent = isVol ? '✓ Confirmer un VOL' : '✗ Marquer comme fausse alerte';
+  document.getElementById('fb-titre').style.color = isVol ? '#2ecc71' : '#e74c3c';
+  document.getElementById('fb-detail').innerHTML =
+    '<strong>' + typeLabel + '</strong><br>' + cam + ' — ' + heure;
+  const btn = document.getElementById('fb-btn-ok');
+  btn.textContent = isVol ? 'Oui, c\'est un vol' : 'Oui, fausse alerte';
+  btn.className = 'fb-confirmer ' + (isVol ? 'vol' : 'faux');
+
+  document.getElementById('modal-fb').style.display = 'flex';
+};
+
+// Envoi feedback avec retry automatique (3 tentatives)
+function _envoyerFeedback(id, val, tentative) {
+  tentative = tentative || 1;
+  return fetch('/api/feedback', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: id, feedback: val})
+  })
+  .then(r => r.json().then(d => ({ status: r.status, body: d })))
+  .then(({ status, body }) => {
+    if (status === 200 && body.ok) return { ok: true };
+    throw new Error(body.error || 'Erreur serveur ' + status);
+  })
+  .catch(err => {
+    if (tentative < 3) {
+      return new Promise(res => setTimeout(res, 1500))
+        .then(() => _envoyerFeedback(id, val, tentative + 1));
+    }
+    throw err;
+  });
+}
+
+window.confirmerFeedback = function() {
+  if (!_fbPending) return;
+  const {idx, val} = _fbPending;
+  _fbPending = null;
+  fermerFb();
+
+  const a = window._alertes[idx];
+  if (!a || !a.id) { toast('⚠ ID alerte manquant', 'err'); return; }
+  const id = a.id;
+
+  // Visuel immédiat — remplacer les boutons par le badge
+  feedbacksLocaux[id] = val;
+  const row = document.getElementById('row-' + idx);
+  if (row) {
+    row.classList.remove('fb-vol', 'fb-faux');
+    row.classList.add(val === 'ok' ? 'fb-vol' : 'fb-faux');
+    const btns = row.querySelector('.a-btns');
+    if (btns) {
+      const vidBtn = btns.querySelector('.btn-v');
+      const badge = val === 'ok'
+        ? '<span class="fb-badge vol">⚠ VOL CONFIRMÉ</span>'
+        : '<span class="fb-badge faux">✓ Fausse alerte</span>';
+      btns.innerHTML = (vidBtn ? vidBtn.outerHTML : '') + badge;
+    }
+  }
+
+  _envoyerFeedback(id, val)
+    .then(() => {
+      toast(val === 'ok' ? '⚠ VOL enregistré dans le système !' : '✓ Fausse alerte enregistrée !', 'ok');
+      const a2 = toutesAlertes.find(x => x.id === id);
+      if (a2) a2.feedback = val;
+      chargerStatutCameras();
+    })
+    .catch(err => {
+      toast('✗ Échec enregistrement (3 tentatives): ' + err.message, 'err');
+    });
+};
+
+function fermerFb() {
+  _fbPending = null;
+  document.getElementById('modal-fb').style.display = 'none';
+}
+document.getElementById('modal-fb').addEventListener('click', e => {
+  if (e.target.id === 'modal-fb') fermerFb();
+});
+
+// ── VIDÉO (appelé par onclick) ──
+window.doVideo = function(nom, cam) {
+  ouvrirVideo(nom, cam);
+};
+
+// ── AFFICHAGE ALERTES ──
+function afficherAlertes() {
+  const fDate = document.getElementById('f-date').value;
+  const fType = document.getElementById('f-type').value;
+  const el = document.getElementById('al');
+
+  let data = toutesAlertes.filter(a => !EXCLUDED_TYPES.includes(a.type));
+  if (fDate) data = data.filter(a => (a.date||'') === fDate);
+  if (fType) data = data.filter(a => a.type === fType);
+
+  document.getElementById('nb-res').textContent = data.length ? data.length + ' alerte' + (data.length>1?'s':'') : '';
+
+  if (!data.length) {
+    el.innerHTML = '<div class="vide">Aucune alerte</div>';
+    window._alertes = [];
+    return;
+  }
+
+  const slice = data.slice(0, 80);
+  window._alertes = slice;
+
+  el.innerHTML = slice.map((a, i) => {
+    const fb = feedbacksLocaux[a.id] || a.feedback || '';
+    const type = TYPES[a.type] || (a.type||'');
+    const vid = a.video || '';
+    const cam = a.camera || '';
+    return '<div class="alerte-row" id="row-' + i + '">'
+      + '<span class="a-date">' + (a.date||'').slice(5) + '</span>'
+      + '<span class="a-heure">' + (a.heure||'') + '</span>'
+      + '<span class="a-cam">' + cam + '</span>'
+      + '<span class="a-type t-' + (a.type||'') + '">' + type + '</span>'
+      + '<div class="a-btns">'
+      + (vid ? '<button class="btn-v" onclick="window.doVideo(\'' + vid + '\',\'' + cam + '\')">&#9654; Vidéo</button>' : '')
+      + (fb === 'ok'
+          ? '<span class="fb-badge vol">⚠ VOL CONFIRMÉ</span>'
+          : fb === 'faux'
+            ? '<span class="fb-badge faux">✓ Fausse alerte</span>'
+            : '<button class="btn-vol"  onclick="window.doFeedback(' + i + ',\'ok\')"   title="C\'est un vrai vol">⚠ Vol</button>'
+            + '<button class="btn-faux" onclick="window.doFeedback(' + i + ',\'faux\')" title="Fausse alerte IA">✗ Faux</button>')
+      + '</div></div>';
+  }).join('');
+}
+
+// ── CHARGEMENT ALERTES ──
+function chargerAlertes() {
+  fetch('/api/alertes')
+    .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); })
+    .then(d => {
+      toutesAlertes = d || [];
+      const visible = toutesAlertes.filter(a => !EXCLUDED_TYPES.includes(a.type));
+      document.getElementById('s-alertes').textContent = visible.filter(a => (a.date||'') === today).length;
+      afficherAlertes();
+    })
+    .catch(() => {
+      document.getElementById('al').innerHTML = '<div class="vide">Erreur de connexion serveur</div>';
+    });
+}
+
+function resetFiltres() {
+  document.getElementById('f-date').value = '';
+  document.getElementById('f-type').value = '';
+  afficherAlertes();
+}
+
+document.getElementById('f-date').addEventListener('change', afficherAlertes);
+document.getElementById('f-type').addEventListener('change', afficherAlertes);
+
+// ── VISITEURS ──
+function chargerVisiteurs() {
+  fetch('/api/visiteurs/actifs').then(r=>r.json()).then(d=>{
+    document.getElementById('s-actifs').textContent = d.length;
+  }).catch(()=>{});
+  fetch('/api/visiteurs?date='+today).then(r=>r.json()).then(d=>{
+    document.getElementById('s-visiteurs').textContent = d.length;
+  }).catch(()=>{});
+}
+
+// ── STATUT CAMÉRAS + COMPTEURS ──
+function chargerStatutCameras() {
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    // Titre navigateur
+    const ko = d.cameras.filter(c => !c.connectee).length;
+    document.title = ko > 0 ? ('⚠️ ' + ko + ' cam. déco. — RadarIA') : 'RadarIA — Surveillance';
+    // Compteurs incidents confirmés
+    if (d.nb_vols_confirmes !== undefined) {
+      document.getElementById('s-vols').textContent = d.nb_vols_confirmes;
+    }
+    if (d.nb_faux_positifs !== undefined) {
+      document.getElementById('s-faux').textContent = d.nb_faux_positifs;
+    }
+  }).catch(()=>{});
+}
+
+
+function ouvrirVideo(nom, cam) {
+  document.getElementById('modal-titre').textContent = 'Camera: '+cam+'  |  '+nom;
+  document.getElementById('modal-content').innerHTML =
+    `<video controls autoplay style="width:100%;border-radius:8px;max-height:65vh;background:#000"
+             onerror="this.style.display='none';document.getElementById('vid-err').style.display='flex'">
+       <source src="/videos/${nom}" type="video/mp4">
+     </video>
+     <div id="vid-err" style="display:none;flex-direction:column;align-items:center;gap:1em;padding:2.5em;color:#666;font-size:.85em">
+       <div>Vidéo non lisible dans le navigateur (ancien codec)</div>
+       <a href="/videos/${nom}" download="${nom}"
+          style="background:#e74c3c;color:#fff;padding:.6em 1.6em;border-radius:.5em;text-decoration:none;font-weight:700">
+         ⬇ Télécharger la vidéo
+       </a>
+     </div>
+     <div style="text-align:right;margin-top:.5em">
+       <a href="/videos/${nom}" download="${nom}"
+          style="color:#444;font-size:.75em;text-decoration:none">⬇ Télécharger</a>
+     </div>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+function fermerModal() {
+  document.getElementById('modal').style.display = 'none';
+  document.getElementById('modal-content').innerHTML = '';
+}
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target.id==='modal') fermerModal();
+});
+
+function ouvrirDeco() { document.getElementById('modal-deco').style.display='flex'; }
+function fermerDeco() { document.getElementById('modal-deco').style.display='none'; }
+function seDeconnecter() { window.location.href='about:blank'; }
+document.getElementById('modal-deco').addEventListener('click', e => {
+  if (e.target.id==='modal-deco') fermerDeco();
+});
+
+// ── PANNEAU IA — STATUTS PAR TYPE ──
+const TYPES_LABELS = {
+  mouvement_rapide: 'Mouvement suspect',
+  posture_basse:    'Posture suspecte',
+  presence_longue:  'Présence longue',
+  sac_suspect:      'Sac suspect',
+  consommation:     'Consommation',
+  dissimulation:    'Dissimulation',
+  objet_cache:      'Objet caché',
+};
+const STATUT_LABELS = { actif:'Actif', prudent:'Prudent (×3)', silence:'Silencé' };
+
+function chargerTypesStatuts() {
+  fetch('/api/types-statuts').then(r=>r.json()).then(data => {
+    const el = document.getElementById('ia-types');
+    el.innerHTML = data.map(t => {
+      const lbl = TYPES_LABELS[t.type] || t.type;
+      const sl  = STATUT_LABELS[t.statut] || t.statut;
+      const ratio = t.ratio_faux !== null ? Math.round(t.ratio_faux * 100) + '% faux' : 'pas de données';
+      const next = t.statut === 'actif' ? 'silence' : 'actif';
+      return `<div class="ia-type" title="Clic: basculer actif/silence" onclick="toggleTypeStatut('${t.type}','${next}')">
+        <div class="ia-dot ${t.statut}"></div>
+        <span class="ia-nom">${lbl}</span>
+        <span class="ia-stat">${sl} — ${t.total_feedbacks} feedbacks${t.total_feedbacks ? ' ('+ratio+')' : ''}</span>
+      </div>`;
+    }).join('');
+  }).catch(()=>{});
+}
+
+function toggleTypeStatut(type, statut) {
+  fetch('/api/types-statuts/' + type, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({statut})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      toast('IA — ' + (TYPES_LABELS[type]||type) + ' → ' + (STATUT_LABELS[statut]||statut), 'ok');
+      chargerTypesStatuts();
+    }
+  }).catch(()=>{});
+}
+
+chargerAlertes();
+chargerVisiteurs();
+chargerStatutCameras();
+chargerTypesStatuts();
+setInterval(chargerAlertes, 20000);
+setInterval(chargerVisiteurs, 30000);
+setInterval(chargerStatutCameras, 10000);
+setInterval(chargerTypesStatuts, 30000);
+</script>
+</body>
+</html>

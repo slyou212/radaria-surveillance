@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import cv2, json, os, time, threading, logging
+import cv2, json, os, time, threading, logging, urllib.request
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, Response, render_template, jsonify, send_file, request
+from flask import Flask, Response, render_template, render_template_string, jsonify, send_file, request
 from ultralytics import YOLO
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -69,6 +69,8 @@ SEUILS        = CFG["seuils"]
 DELAI_ALERTE  = CFG.get("delai_entre_alertes_sec", 30)
 DELAI_ALERTE_RAPIDE = CFG.get("delai_alertes_rapides_sec", 15)
 PORT          = CFG.get("dashboard_port", 5000)
+CAMERAS_CAISSE     = set(CFG.get("cameras_caisse", []))
+DUREE_VOL_CAISSE   = CFG.get("duree_vol_caisse_sec", 12)
 
 # ── Config gestes par caméra (mise à jour dynamique toutes les 5 min) ──
 _gestes_lock = threading.Lock()
@@ -120,13 +122,17 @@ FPS_BUFFER      = 10   # fréquence d'échantillonnage du buffer
 # ── Classes YOLO COCO pour détection d'objets suspects ──
 # Sacs : backpack(24), handbag(26), suitcase(28)
 SAC_CLASSES   = {24: "sac à dos", 26: "sac à main", 28: "valise"}
-# Consommation : bottle(39), wine glass(40), cup(41), banana(46),
-#               apple(47), sandwich(48), orange(49), pizza(53)
-CONSO_CLASSES = {39: "bouteille", 40: "verre", 41: "tasse",
+# Consommation : bottle(39), wine glass(40), cup(41), fork(42), knife(43), spoon(44),
+#               bowl(45), banana(46), apple(47), sandwich(48), orange(49),
+#               broccoli(50), carrot(51), hot dog(52), pizza(53), donut(54), cake(55)
+CONSO_CLASSES = {39: "bouteille", 40: "verre", 41: "tasse", 42: "fourchette",
+                 43: "couteau", 44: "cuillère", 45: "bol",
                  46: "banane", 47: "pomme", 48: "sandwich",
-                 49: "orange", 53: "pizza"}
+                 49: "orange", 50: "brocoli", 51: "carotte", 52: "hot-dog",
+                 53: "pizza", 54: "donut", 55: "gâteau"}
 DUREE_SAC_SUSPECT    = SEUILS.get("duree_sac_suspect_sec", 20)  # secondes avec sac détecté avant alerte
-CONSO_CONF           = 0.45 # seuil confiance détection objet consommation
+CONSO_CONF           = 0.25 # seuil confiance détection objets consommation
+SAC_CONF             = 0.15 # seuil confiance sacs (plus bas = catch sacs plastique, cabas)
 
 # ── Paramètres visiteurs ─────────────────────────────────────
 FENETRE_RETOUR_MIN   = CFG.get("fenetre_retour_visiteur_min", 60)  # si même personne revient dans les X min → passage supplémentaire
@@ -379,11 +385,13 @@ class CameraDetecteur:
 
         # Caméra désactivée globalement
         if cam_cfg and not cam_cfg.get("active", True):
+            logger.debug(f"[ALERTE BLOQUÉE] {self.nom} — caméra désactivée (active=False dans config backoffice)")
             return
 
         # Ce geste est-il activé pour cette caméra ?
         gestes = cam_cfg.get("gestes", {})
         if gestes and not gestes.get(type_alerte, True):
+            logger.debug(f"[ALERTE BLOQUÉE] {self.nom}/{type_alerte} — geste désactivé dans config backoffice")
             return
 
         # Reset compteur journalier si nouveau jour
@@ -408,7 +416,7 @@ class CameraDetecteur:
         if cooldown_min is not None:
             delai = cooldown_min * 60
         else:
-            TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation"}
+            TYPES_RAPIDES = {"mouvement_rapide", "posture_basse", "sac_suspect", "consommation", "dissimulation", "vol_caisse"}
             base_delai = DELAI_ALERTE_RAPIDE if type_alerte in TYPES_RAPIDES else DELAI_ALERTE
             delai = base_delai * 3 if statut == "prudent" else base_delai
 
@@ -576,6 +584,13 @@ class CameraDetecteur:
             for i, box in enumerate(boxes.xyxy.cpu().numpy()):
                 x1, y1, x2, y2 = map(int, box)
                 tid = ids[i] if i < len(ids) else -1
+                # ── Filtre 1 : ignorer les détections sans ID stable (fantômes) ──
+                if tid < 0:
+                    continue
+                # ── Filtre 2 : ignorer les boîtes trop petites (produits, objets) ──
+                hauteur = y2 - y1
+                if hauteur < 80:
+                    continue
                 cx, cy = (x1+x2)//2, (y1+y2)//2
                 ids_vus.add(tid)
                 if tid not in self.historique:
@@ -583,6 +598,12 @@ class CameraDetecteur:
                         "debut": time.time(), "positions": [], "mvt_count": 0,
                         "sac_depuis": None,   # timestamp 1ère détection sac près de cette personne
                         "conso_frames": 0,    # frames consécutives avec objet consommable
+                        "height_max": (y2-y1),# hauteur max observée (debout = référence)
+                        "posture_frames": 0,  # frames consécutives de courbure détectée
+                        "dissim_phase": 0,    # 0=idle 1=still_confirmé 2=burst
+                        "dissim_still_t": None, # timestamp début immobilité
+                        "dissim_burst_t": None, # timestamp début burst
+                        "dissim_burst_n": 0,  # frames rapides pendant burst
                     }
                     # Nouveau visiteur — numéro séquentiel
                     num = _prochain_numero()
@@ -617,6 +638,9 @@ class CameraDetecteur:
                         visiteurs_actifs[tid]["photo"] = photo_path.name
                 if duree > self.duree_suspect:
                     self.envoyer_alerte("presence_longue", frame)
+                # ── VOL CAISSE (présence prolongée à la caisse) ──
+                if self.nom in CAMERAS_CAISSE and duree > DUREE_VOL_CAISSE:
+                    self.envoyer_alerte("vol_caisse", frame)
                 if hist["positions"]:
                     px, py = hist["positions"][-1]
                     if abs(cx-px)+abs(cy-py) > self.mvt_pixels:
@@ -625,14 +649,70 @@ class CameraDetecteur:
                         hist["mvt_count"] = 0
                     if hist["mvt_count"] >= self.mvt_frames:
                         self.envoyer_alerte("mouvement_rapide", frame)
-                if (x2-x1) > (y2-y1)*1.2 and (y2-y1) > 30:
-                    self.envoyer_alerte("posture_basse", frame)
+                # ── DISSIMULATION (vol sans sac : immobile→geste rapide→immobile) ──
+                _spd = 0
+                if hist["positions"]:
+                    _px, _py = hist["positions"][-1]
+                    _spd = abs(cx - _px) + abs(cy - _py)
+                _immobile = (_spd <= self.mvt_pixels)
+                _rapide   = (_spd > self.mvt_pixels)
+                _dp   = hist.get("dissim_phase", 0)
+                _tnow = time.time()
+                if _dp == 0:                              # Attente d'immobilité
+                    if _immobile:
+                        if hist.get("dissim_still_t") is None:
+                            hist["dissim_still_t"] = _tnow
+                        elif _tnow - hist["dissim_still_t"] >= 5.0:
+                            hist["dissim_phase"] = 1      # immobilité ≥5s confirmée
+                    else:
+                        hist["dissim_still_t"] = None
+                elif _dp == 1:                            # Immobilité OK, attendre burst
+                    if _rapide:
+                        hist["dissim_phase"]   = 2
+                        hist["dissim_burst_t"] = _tnow
+                        hist["dissim_burst_n"] = 1
+                        hist["dissim_still_t"] = None
+                    elif not _immobile:                   # mouvement modéré → reset
+                        hist["dissim_phase"]   = 0
+                        hist["dissim_still_t"] = None
+                elif _dp == 2:                            # Burst — surveiller retour immobile
+                    _be = _tnow - hist.get("dissim_burst_t", _tnow)
+                    if _rapide:
+                        hist["dissim_burst_n"] = hist.get("dissim_burst_n", 0) + 1
+                    if _be > 4.0:                         # burst trop long = déplacement normal
+                        hist["dissim_phase"]   = 0
+                        hist["dissim_still_t"] = None
+                        hist["dissim_burst_t"] = None
+                    elif _immobile and hist.get("dissim_burst_n", 0) >= 2:
+                        # Burst bref ≥2 frames + retour immobile = DISSIMULATION !
+                        self.envoyer_alerte("dissimulation", frame)
+                        hist["dissim_phase"]   = 0
+                        hist["dissim_still_t"] = None
+                        hist["dissim_burst_t"] = None
+                # ── POSTURE BASSE (courbure pour ramasser/dissimuler) ──
+                h_now = y2 - y1
+                h_max = hist.get("height_max", h_now)
+                # Warm-up : pas de mesure posture pendant les 2 premières secondes
+                if duree >= 2.0:
+                    if h_now > h_max:
+                        hist["height_max"] = h_now      # mise à jour de la hauteur debout
+                    elif h_max > 60 and h_now < h_max * 0.65:
+                        # Personne 35%+ plus courte que son max = courbure nette
+                        hist["posture_frames"] = hist.get("posture_frames", 0) + 1
+                        if hist["posture_frames"] >= 3:
+                            self.envoyer_alerte("posture_basse", frame)
+                    else:
+                        hist["posture_frames"] = max(0, hist.get("posture_frames", 0) - 1)
+                else:
+                    # Pendant warm-up, mettre à jour h_max seulement
+                    if h_now > h_max:
+                        hist["height_max"] = h_now
                 hist["positions"].append((cx, cy))
                 if len(hist["positions"]) > 30:
                     hist["positions"].pop(0)
                 couleur = (0,0,255) if any(self.derniere_alerte.get(t,0) > time.time()-5
                     for t in ["presence_longue","mouvement_rapide","posture_basse",
-                              "sac_suspect","consommation"]) else (0,255,0)
+                              "sac_suspect","consommation","dissimulation","vol_caisse"]) else (0,255,0)
                 cv2.rectangle(frame, (x1,y1), (x2,y2), couleur, 2)
                 cv2.putText(frame, f"ID:{tid} {duree:.0f}s", (x1,y1-10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, couleur, 2)
@@ -641,7 +721,9 @@ class CameraDetecteur:
             # Un seul passage YOLO pour tous les objets en même temps
             toutes_classes = list(SAC_CLASSES.keys()) + list(CONSO_CLASSES.keys())
             try:
-                res_obj = model(frame, classes=toutes_classes, conf=CONSO_CONF,
+                # conf = SAC_CONF (le plus bas) pour ne pas manquer les sacs
+                # les objets conso seront filtrés à CONSO_CONF dans la boucle
+                res_obj = model(frame, classes=toutes_classes, conf=SAC_CONF,
                                 verbose=False)
                 objs = res_obj[0].boxes if res_obj and res_obj[0].boxes else None
             except Exception:
@@ -652,8 +734,9 @@ class CameraDetecteur:
                             for i, b in enumerate(boxes.xyxy.cpu().numpy())]
 
             if objs is not None and len(objs) > 0:
-                for obj_box, obj_cls in zip(objs.xyxy.cpu().numpy(),
-                                             objs.cls.cpu().numpy().astype(int)):
+                for obj_box, obj_cls, obj_conf in zip(objs.xyxy.cpu().numpy(),
+                                             objs.cls.cpu().numpy().astype(int),
+                                             objs.conf.cpu().numpy()):
                     ox1, oy1, ox2, oy2 = map(int, obj_box)
                     ocx, ocy = (ox1+ox2)//2, (oy1+oy2)//2
 
@@ -673,6 +756,10 @@ class CameraDetecteur:
 
                         hist = self.historique[tid]
 
+                        # Filtre conf par type : sacs à SAC_CONF, conso à CONSO_CONF
+                        if obj_cls in CONSO_CLASSES and obj_conf < CONSO_CONF:
+                            continue
+
                         if obj_cls in SAC_CLASSES:
                             # ── SAC SUSPECT ──
                             if hist["sac_depuis"] is None:
@@ -687,11 +774,10 @@ class CameraDetecteur:
 
                         elif obj_cls in CONSO_CLASSES:
                             # ── CONSOMMATION ──
-                            # L'objet doit être dans la moitié haute du corps (mains/bouche)
-                            mi_corps = py1 + (py2-py1)//2
-                            if ocy < mi_corps + 60:  # objet au niveau torse/tête
+                            # L'objet doit être proche de la personne (étagère haute ou basse)
+                            if ocy < py2 + 40:  # objet dans la zone corps élargie
                                 hist["conso_frames"] = hist.get("conso_frames", 0) + 1
-                                if hist["conso_frames"] >= 8:  # ~0.8s consécutive
+                                if hist["conso_frames"] >= 3:  # ~0.3s consécutive (était 8)
                                     self.envoyer_alerte("consommation", frame)
                                     hist["conso_frames"] = 0
                             else:
@@ -988,7 +1074,6 @@ def video_alerte(nom):
         resp.headers["Content-Range"] = f"bytes {byte_start}-{byte_end}/{file_size}"
         resp.headers["Accept-Ranges"] = "bytes"
         resp.headers["Content-Length"] = str(length)
-        return resp
     resp = send_file(str(p), mimetype="video/mp4")
     resp.headers["Accept-Ranges"] = "bytes"
     return resp
@@ -1008,4 +1093,248 @@ def api_visiteur_categorie(visiteur_id):
     for v in visiteurs_log:
         if v.get("id") == visiteur_id:
             v["categorie"] = cat
-            with 
+            with _save_lock:
+                _sauvegarder_json(VISITEURS_LOG_FILE, visiteurs_log)
+            return jsonify({"ok": True})
+    return jsonify({"error": "Visiteur introuvable"}), 404
+
+@app.route("/api/visiteurs/actifs")
+def api_visiteurs_actifs():
+    return jsonify([
+        {"id": tid, "camera": v["camera"], "debut": v["debut"]}
+        for tid, v in visiteurs_actifs.items()
+    ])
+
+@app.route("/historique")
+def historique():
+    return render_template("historique.html",
+        cameras=list({a["camera"] for a in alertes_log}),
+        types=["presence_longue", "mouvement_rapide", "posture_basse"])
+
+@app.route("/visiteurs")
+def visiteurs_page():
+    return render_template("visiteurs.html")
+
+def backoffice_register(ip):
+    """Enregistre ce PC dans le backoffice au démarrage."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    try:
+        import urllib.request as _req, platform
+        payload = json.dumps({
+            "license_key": LICENSE_KEY,
+            "hostname": socket.gethostname(),
+            "ip_locale": ip,
+            "os_info": platform.system() + " " + platform.release(),
+            "nb_cameras": len(CFG.get("cameras", [])),
+        }).encode()
+        req = _req.Request(f"{BACKOFFICE_URL}/api/register", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST")
+        _req.urlopen(req, timeout=10)
+        logger.info("PC enregistre dans le backoffice")
+    except Exception as e:
+        logger.warning(f"Erreur register backoffice: {e}")
+
+def snapshot_push_loop():
+    """Envoie un snapshot JPEG de chaque caméra au backoffice toutes les 5 s."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    import urllib.request as _req, base64
+    import numpy as np
+    while True:
+        time.sleep(5)
+        for cam in list(cameras.values()):
+            try:
+                with cam.lock:
+                    f = cam.frame
+                if not f:
+                    continue
+                arr = cv2.imdecode(np.frombuffer(f, np.uint8), cv2.IMREAD_COLOR)
+                if arr is None:
+                    continue
+                # Redimensionner à 640px pour limiter la bande passante
+                h, w = arr.shape[:2]
+                if w > 640:
+                    arr = cv2.resize(arr, (640, int(h * 640 / w)))
+                _, buf = cv2.imencode('.jpg', arr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                img_b64 = base64.b64encode(buf.tobytes()).decode()
+                payload = json.dumps({
+                    "license_key": LICENSE_KEY,
+                    "camera": cam.nom,
+                    "image_b64": img_b64,
+                }).encode()
+                req = _req.Request(
+                    f"{BACKOFFICE_URL}/api/snapshot",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                _req.urlopen(req, timeout=4)
+            except Exception:
+                pass
+
+def calibration_loop():
+    """Fetch statuts IA (actif/prudent/silence) depuis backoffice et met a jour apprentissage toutes les 24h."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    import urllib.request as _req
+    time.sleep(90)  # Laisser le systeme demarrer
+    while True:
+        try:
+            url = f"{BACKOFFICE_URL}/api/calibration/{LICENSE_KEY}"
+            with _req.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            statuts = data.get("statuts", {})
+            if statuts:
+                apprentissage.setdefault("statuts_par_type", {}).update(statuts)
+                _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
+                resume = ", ".join(f"{k}={v}" for k, v in statuts.items())
+                logger.info(f"[CALIBRATION] Statuts IA mis a jour: {resume}")
+        except Exception as e:
+            logger.warning(f"[CALIBRATION] Erreur fetch: {e}")
+        time.sleep(86400)  # Toutes les 24h
+
+
+def heartbeat_loop():
+    """Envoie un ping au backoffice toutes les 60 secondes."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    import urllib.request as _req
+    while True:
+        time.sleep(60)
+        try:
+            actives = sum(1 for c in cameras.values() if c.frame is not None)
+            payload = json.dumps({
+                "license_key": LICENSE_KEY,
+                "cameras_actives": actives,
+                "nb_cameras": len(cameras),
+            }).encode()
+            req = _req.Request(f"{BACKOFFICE_URL}/api/heartbeat", data=payload,
+                headers={"Content-Type": "application/json"}, method="POST")
+            _req.urlopen(req, timeout=5)
+            logger.info(f"Heartbeat OK ({actives}/{len(cameras)} cameras actives)")
+        except Exception as e:
+            logger.warning(f"Heartbeat error: {e}")
+
+
+# ─── KIOSK HTML ──────────────────────────────────────────────────────────────
+KIOSQUE_HTML = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="60">
+<title>RadarIA &#8212; Kiosque</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    background: {% if statut == 'suspendu' %}#c0392b{% else %}#0a0a1a{% endif %};
+    color: {% if statut == 'suspendu' %}#fff{% else %}#e0e0e0{% endif %};
+    text-align: center;
+  }
+  .logo { font-size: 3em; font-weight: 900; letter-spacing: 0.05em; margin-bottom: 0.2em; }
+  .logo span { color: #e74c3c; }
+  .subtitle { font-size: 1.1em; opacity: 0.7; margin-bottom: 2em; }
+  .status-badge {
+    padding: 0.4em 1.2em; border-radius: 999px; font-size: 0.95em;
+    font-weight: 600; letter-spacing: 0.08em; margin-bottom: 2.5em;
+    background: {% if statut == 'suspendu' %}rgba(255,255,255,0.2){% else %}#1a7a1a{% endif %};
+    color: #fff;
+  }
+  .cameras-info { font-size: 1.4em; margin-bottom: 0.5em; }
+  .alertes-info { font-size: 1em; opacity: 0.6; }
+  .warning-block {
+    margin-top: 2em; padding: 1.5em 2em;
+    background: rgba(255,255,255,0.15); border-radius: 12px;
+    max-width: 500px;
+  }
+  .warning-block h2 { font-size: 1.6em; margin-bottom: 0.5em; }
+  .warning-block p { opacity: 0.9; line-height: 1.6; }
+  footer { position: fixed; bottom: 1em; font-size: 0.75em; opacity: 0.4; }
+</style>
+</head>
+<body>
+  <div class="logo">Radar<span>IA</span></div>
+  <div class="subtitle">Surveillance intelligente &mdash; Slidis Market</div>
+
+  {% if statut == 'suspendu' %}
+  <div class="status-badge">&#9888;&#65039; LICENCE SUSPENDUE</div>
+  <div class="warning-block">
+    <h2>&#128683; Surveillance inactive</h2>
+    <p>La licence de surveillance est suspendue.<br>
+    Veuillez contacter votre administrateur RadarIA.</p>
+  </div>
+  {% else %}
+  <div class="status-badge">&#128308; SURVEILLANCE ACTIVE</div>
+  <div class="cameras-info">&#128737;&#65039; {{ nb_cameras }} / {{ total_cameras }} cam&eacute;ra(s) actives</div>
+  <div class="alertes-info">{{ nb_alertes }} alerte(s) en m&eacute;moire</div>
+  {% endif %}
+
+  <footer>RadarIA v4.7 &mdash; Protection en cours</footer>
+</body>
+</html>
+"""
+
+@app.route("/kiosque")
+def kiosque():
+    statut = "actif"
+    try:
+        url = f"{BACKOFFICE_URL}/api/pc/statut?license_key={LICENSE_KEY}"
+        with urllib.request.urlopen(url, timeout=4) as r:
+            statut = json.loads(r.read().decode()).get("statut", "actif")
+    except Exception:
+        statut = "hors-ligne"
+    nb_cam = len([c for c in cameras.values() if c.frame is not None])
+    return render_template_string(KIOSQUE_HTML,
+        statut=statut,
+        nb_cameras=nb_cam,
+        total_cameras=len(cameras),
+        nb_alertes=len(alertes_log))
+
+
+def _ping_backoffice_demarrage():
+    """Notifie le backoffice que le PC est demarre (push notification client)."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    try:
+        import socket as _sock
+        ip = _sock.gethostbyname(_sock.gethostname())
+        payload = json.dumps({
+            "license_key": LICENSE_KEY,
+            "ip": ip,
+            "version": "4.7",
+            "nb_cameras": len(CFG.get("cameras", []))
+        }).encode()
+        req = urllib.request.Request(
+            f"{BACKOFFICE_URL}/api/pc/heartbeat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+        logger.info("[PING] Backoffice notifie -- PC connecte")
+    except Exception as e:
+        logger.warning(f"[PING] Echec ping backoffice: {e}")
+
+
+if __name__ == "__main__":
+    import socket
+    ip = socket.gethostbyname(socket.gethostname())
+    print(f"\n{'='*50}\n  SURVEILLANCE DEMARREE\n  Dashboard: http://{ip}:{PORT}\n{'='*50}\n")
+    for c in CFG["cameras"]:
+        cam = CameraDetecteur(c)
+        cam.demarrer()
+        cameras[cam.id] = cam
+    # Enregistrement + heartbeat backoffice
+    backoffice_register(ip)
+    _ping_backoffice_demarrage()
+    threading.Thread(target=heartbeat_loop,      daemon=True).start()
+    threading.Thread(target=snapshot_push_loop,  daemon=True).start()
+    threading.Thread(target=calibration_loop,    daemon=True).start()
+    # Sync historique alertes depuis backoffice
+    threading.Thread(target=sync_alertes_backoffice, daemon=True).start()
+    app.run(host="0.0.0.0", port=PORT, threaded=True)

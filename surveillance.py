@@ -1173,6 +1173,28 @@ def snapshot_push_loop():
             except Exception:
                 pass
 
+def calibration_loop():
+    """Fetch statuts IA (actif/prudent/silence) depuis backoffice et met a jour apprentissage toutes les 24h."""
+    if not LICENSE_KEY or not BACKOFFICE_URL:
+        return
+    import urllib.request as _req
+    time.sleep(90)  # Laisser le systeme demarrer
+    while True:
+        try:
+            url = f"{BACKOFFICE_URL}/api/calibration/{LICENSE_KEY}"
+            with _req.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            statuts = data.get("statuts", {})
+            if statuts:
+                apprentissage.setdefault("statuts_par_type", {}).update(statuts)
+                _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
+                resume = ", ".join(f"{k}={v}" for k, v in statuts.items())
+                logger.info(f"[CALIBRATION] Statuts IA mis a jour: {resume}")
+        except Exception as e:
+            logger.warning(f"[CALIBRATION] Erreur fetch: {e}")
+        time.sleep(86400)  # Toutes les 24h
+
+
 def heartbeat_loop():
     """Envoie un ping au backoffice toutes les 60 secondes."""
     if not LICENSE_KEY or not BACKOFFICE_URL:
@@ -1312,6 +1334,7 @@ if __name__ == "__main__":
     _ping_backoffice_demarrage()
     threading.Thread(target=heartbeat_loop,      daemon=True).start()
     threading.Thread(target=snapshot_push_loop,  daemon=True).start()
+    threading.Thread(target=calibration_loop,    daemon=True).start()
     # Sync historique alertes depuis backoffice
     threading.Thread(target=sync_alertes_backoffice, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT, threaded=True)

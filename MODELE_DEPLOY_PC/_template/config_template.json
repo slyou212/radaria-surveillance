@@ -1,0 +1,16 @@
+{
+  "nom_magasin":    "{{NOM_CLIENT}}",
+  "backoffice_url": "https://backoffice.radaria.fr",
+  "license_key":    "{{LICENSE_KEY}}",
+  "username":       "{{USERNAME}}",
+  "contact_email":  "{{EMAIL}}",
+  "contact_tel":    "{{TEL}}",
+  "adresse":        "{{ADRESSE}}",
+  "prix_mensuel":   0.0,
+  "nb_cameras":     {{NB_CAMERAS}},
+  "nvr_ip":         "{{NVR_IP}}",
+  "nvr_user":       "{{NVR_USER}}",
+  "nvr_password":   "{{NVR_PASSWORD}}",
+  "nvr_port":       554,
+  "cameras": []
+}

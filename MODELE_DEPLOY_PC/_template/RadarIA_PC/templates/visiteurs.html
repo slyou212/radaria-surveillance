@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visiteurs — RadarIA</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html { font-size: clamp(10px, 1vw, 15px); }
+body { background:#0a0a0a; color:#eee; font-family:'Segoe UI',Arial,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+.header { background:#111; padding:0 1.2em; display:flex; align-items:center; gap:1em; border-bottom:2px solid #e74c3c; height:3.2em; flex-shrink:0; }
+.header h1 { color:#e74c3c; font-size:1em; font-weight:800; }
+.nav a { color:#888; text-decoration:none; font-size:.82em; padding:.3em .8em; border-radius:.4em; border:1px solid #222; }
+.nav a:hover { color:#e74c3c; border-color:#e74c3c; }
+.nav { margin-left:auto; }
+
+.toolbar { background:#111; padding:.5em 1em; border-bottom:1px solid #1a1a1a; display:flex; gap:.6em; align-items:center; flex-shrink:0; flex-wrap:wrap; }
+.toolbar input, .toolbar select {
+  background:#0a0a0a; border:1px solid #222; border-radius:.4em;
+  padding:.3em .7em; color:#eee; font-size:.82em; height:2em;
+}
+.toolbar input:focus, .toolbar select:focus { outline:none; border-color:#e74c3c; }
+.toolbar button { background:#e74c3c; border:none; border-radius:.4em; padding:.3em .9em; color:#fff; font-size:.82em; cursor:pointer; font-weight:600; height:2em; }
+.toolbar button.sec { background:#1a1a1a; border:1px solid #333; color:#888; }
+.toolbar button.sec:hover { border-color:#e74c3c; color:#e74c3c; }
+
+.stats-bar { display:flex; gap:1px; background:#0a0a0a; border-bottom:1px solid #1a1a1a; flex-shrink:0; }
+.stat { flex:1; background:#111; padding:.6em; text-align:center; }
+.stat-val { font-size:1.3em; font-weight:800; color:#e74c3c; }
+.stat-val.g { color:#2ecc71; }
+.stat-val.o { color:#e67e22; }
+.stat-val.b { color:#3498db; }
+.stat-lbl { font-size:.67em; color:#555; }
+
+.content { flex:1; overflow-y:auto; }
+.content::-webkit-scrollbar { width:.3em; }
+.content::-webkit-scrollbar-thumb { background:#222; }
+
+.gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(11em,1fr)); gap:.7em; padding:.8em; }
+
+.card { background:#111; border-radius:.7em; overflow:hidden; border:1px solid #1a1a1a; display:flex; flex-direction:column; }
+.card:hover { border-color:#333; }
+.card-photo { position:relative; }
+.card-photo img { width:100%; height:8em; object-fit:cover; background:#000; display:block; }
+.no-photo { width:100%; height:8em; background:#0f0f0f; display:flex; align-items:center; justify-content:center; color:#222; font-size:2.5em; }
+.card-num { position:absolute; top:.3em; left:.3em; background:rgba(0,0,0,.75); color:#e74c3c; font-size:.7em; font-weight:800; padding:.15em .4em; border-radius:.3em; font-family:monospace; }
+
+.card-body { padding:.55em .65em; font-size:.78em; display:flex; flex-direction:column; gap:.3em; }
+.card-cam { color:#3498db; font-weight:600; }
+.card-time { color:#555; font-family:monospace; font-size:.9em; }
+.card-dur { color:#e67e22; font-weight:700; }
+.card-date { color:#333; font-size:.85em; }
+
+.badge {
+  display:inline-block; font-size:.72em; padding:.15em .5em; border-radius:.3em; font-weight:700; cursor:pointer; user-select:none;
+}
+.badge.inconnu { background:#1a1a1a; color:#555; border:1px solid #333; }
+.badge.regulier { background:#0d2a0d; color:#2ecc71; border:1px solid #2ecc71; }
+.badge.suspect { background:#2a0a0a; color:#e74c3c; border:1px solid #e74c3c; }
+
+.empty { grid-column:1/-1; text-align:center; padding:3em; color:#333; font-size:.9em; }
+.count-bar { padding:.5em 1em; color:#444; font-size:.78em; flex-shrink:0; border-bottom:1px solid #0f0f0f; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#128101; Visiteurs</h1>
+  <nav class="nav">
+    <a href="/">&#8592; Dashboard</a>
+  </nav>
+</div>
+
+<div class="toolbar">
+  <input type="date" id="f-date">
+  <select id="f-cat">
+    <option value="">Toutes catégories</option>
+    <option value="regulier">Réguliers</option>
+    <option value="inconnu">Inconnus</option>
+    <option value="suspect">Suspects</option>
+  </select>
+  <button onclick="charger()">&#128269; Filtrer</button>
+  <button class="sec" onclick="resetFiltres()">&#10005; Réinitialiser</button>
+</div>
+
+<div class="stats-bar">
+  <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-lbl">Total</div></div>
+  <div class="stat"><div class="stat-val g" id="s-reg">0</div><div class="stat-lbl">Réguliers</div></div>
+  <div class="stat"><div class="stat-val b" id="s-inc">0</div><div class="stat-lbl">Inconnus</div></div>
+  <div class="stat"><div class="stat-val o" id="s-moy">—</div><div class="stat-lbl">Durée moy.</div></div>
+  <div class="stat"><div class="stat-val" id="s-max">—</div><div class="stat-lbl">Durée max</div></div>
+</div>
+
+<div class="count-bar" id="count-bar">Chargement...</div>
+<div class="content">
+  <div class="gallery" id="gallery"></div>
+</div>
+
+<script>
+function fmtDuree(sec) {
+  if (!sec) return '0s';
+  const m = Math.floor(sec/60), s = sec%60;
+  return m > 0 ? `${m}m${s}s` : `${s}s`;
+}
+
+let tousVisiteurs = [];
+
+function charger() {
+  const d = document.getElementById('f-date').value;
+  fetch(`/api/visiteurs${d ? '?date='+d : ''}`).then(r => r.json()).then(data => {
+    tousVisiteurs = data;
+    afficher();
+  }).catch(() => {
+    document.getElementById('count-bar').textContent = 'Erreur de chargement';
+  });
+}
+
+function afficher() {
+  const fCat = document.getElementById('f-cat').value;
+  let data = tousVisiteurs;
+  if (fCat) data = data.filter(v => (v.categorie || 'inconnu') === fCat);
+
+  // Stats sur données complètes (sans filtre catégorie)
+  const total = tousVisiteurs.length;
+  const reg = tousVisiteurs.filter(v => v.categorie === 'regulier').length;
+  const inc = tousVisiteurs.filter(v => !v.categorie || v.categorie === 'inconnu').length;
+  document.getElementById('s-total').textContent = total;
+  document.getElementById('s-reg').textContent = reg;
+  document.getElementById('s-inc').textContent = inc;
+
+  if (tousVisiteurs.length) {
+    const durees = tousVisiteurs.map(v => v.duree_sec || 0).filter(d => d > 0);
+    if (durees.length) {
+      const moy = Math.round(durees.reduce((a,b) => a+b, 0) / durees.length);
+      document.getElementById('s-moy').textContent = fmtDuree(moy);
+      document.getElementById('s-max').textContent = fmtDuree(Math.max(...durees));
+    }
+  }
+
+  document.getElementById('count-bar').textContent = `${data.length} visiteur(s) affichés`;
+
+  const gallery = document.getElementById('gallery');
+  if (!data.length) {
+    gallery.innerHTML = '<div class="empty">Aucun visiteur pour cette sélection</div>';
+    return;
+  }
+
+  gallery.innerHTML = data.map(v => {
+    const num = v.numero ? `V${String(v.numero).padStart(5,'0')}` : v.id || '—';
+    const cat = v.categorie || 'inconnu';
+    const catLabel = {regulier:'Régulier', inconnu:'Inconnu', suspect:'Suspect'}[cat] || cat;
+    const photo = v.photo
+      ? `<img src="/visiteurs/${v.photo}" alt="visiteur" onerror="this.parentElement.innerHTML='<div class=no-photo>&#128100;</div>'">`
+      : `<div class="no-photo">&#128100;</div>`;
+    return `<div class="card" id="card-${v.id}">
+      <div class="card-photo">
+        ${photo}
+        <span class="card-num">${num}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-cam">${v.camera || '—'}</div>
+        <div class="card-time">${v.heure_entree || ''} → ${v.heure_sortie || '...'}</div>
+        <div class="card-dur">${fmtDuree(v.duree_sec)}</div>
+        <div class="card-date">${v.date || ''}</div>
+        <span class="badge ${cat}" onclick="changerCategorie('${v.id}', '${cat}')" title="Cliquer pour changer">${catLabel}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function changerCategorie(id, actuelle) {
+  const ordre = ['inconnu', 'regulier', 'suspect'];
+  const suivante = ordre[(ordre.indexOf(actuelle) + 1) % ordre.length];
+  fetch(`/api/visiteurs/${id}/categorie`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({categorie: suivante})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      // Mettre à jour localement
+      const v = tousVisiteurs.find(x => x.id === id);
+      if (v) v.categorie = suivante;
+      afficher();
+    }
+  });
+}
+
+function resetFiltres() {
+  document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('f-cat').value = '';
+  charger();
+}
+
+document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+charger();
+</script>
+</body>
+</html>
