@@ -584,6 +584,13 @@ class CameraDetecteur:
             for i, box in enumerate(boxes.xyxy.cpu().numpy()):
                 x1, y1, x2, y2 = map(int, box)
                 tid = ids[i] if i < len(ids) else -1
+                # ── Filtre 1 : ignorer les détections sans ID stable (fantômes) ──
+                if tid < 0:
+                    continue
+                # ── Filtre 2 : ignorer les boîtes trop petites (produits, objets) ──
+                hauteur = y2 - y1
+                if hauteur < 80:
+                    continue
                 cx, cy = (x1+x2)//2, (y1+y2)//2
                 ids_vus.add(tid)
                 if tid not in self.historique:
