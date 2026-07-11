@@ -320,6 +320,15 @@ def init_db():
         UNIQUE(magasin_id, camera_name)
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pc_status (
+        license_key  TEXT PRIMARY KEY,
+        last_seen    TEXT,
+        ip           TEXT,
+        version      TEXT,
+        nb_cameras   INTEGER DEFAULT 0
+    )
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -1217,7 +1226,9 @@ def api_mobile_alertes():
     if not client_id: return jsonify({"error":"Authentification requise"}),401
     limit = min(int(request.args.get("limit", 50)), 200)
     conn = get_db(); cur = conn.cursor()
-    cur.execute("""SELECT alert_id,type,camera,date,heure,image_path,video_url,feedback,suspect_id,nb_personnes
+    cur.execute("""SELECT alert_id,type,camera,date,heure,image_path,
+        COALESCE(NULLIF(video_stored_url,''), NULLIF(video_url,'')) AS video_url,
+        feedback,suspect_id,nb_personnes
         FROM alertes_centrales WHERE client_id=%s ORDER BY date DESC,heure DESC LIMIT %s""", (client_id, limit))
     alertes = [dict(a) for a in cur.fetchall()]
     cur.execute("SELECT COUNT(*) as n FROM alertes_centrales WHERE client_id=%s AND date=CURRENT_DATE::TEXT", (client_id,))
@@ -1633,6 +1644,39 @@ def api_mobile_config_gestes():
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok":True,"message":f"{len(cameras)} caméra(s) configurée(s)"})
 
+@app.route("/api/mobile/reset-gestes", methods=["POST"])
+@limiter.limit("10 per minute")
+def api_mobile_reset_gestes():
+    """Réinitialise la config gestes — active tout avec paramètres par défaut."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+    # Récupérer les noms de caméras depuis config_json
+    cur.execute("SELECT config_json FROM clients WHERE id=%s", (client_id,))
+    row = cur.fetchone()
+    config_json_str = (row["config_json"] if row else "") or ""
+    try:
+        cfg = json.loads(config_json_str) if config_json_str.strip() else {}
+        cam_list = cfg.get("cameras", [])
+    except Exception:
+        cam_list = []
+    DEFAULT_GESTES = json.dumps({
+        "mouvement_rapide": True, "posture_basse": True, "presence_longue": True,
+        "sac_suspect": True, "consommation": True, "dissimulation": True, "vol_caisse": True,
+    })
+    for cam in cam_list:
+        nom = cam.get("nom") or cam.get("name") or ""
+        if not nom: continue
+        cur.execute("""
+            INSERT INTO camera_config
+                (magasin_id,camera_name,active,gestes_json,confidence_min,cooldown_min,alertes_max_jour,updated_at)
+            VALUES (%s,%s,TRUE,%s,0.45,1,50,NOW())
+            ON CONFLICT(magasin_id,camera_name) DO UPDATE SET
+                active=TRUE,gestes_json=%s,confidence_min=0.45,cooldown_min=1,alertes_max_jour=50,updated_at=NOW()
+        """, (client_id, nom, DEFAULT_GESTES, DEFAULT_GESTES))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok":True,"message":f"Config gestes réinitialisée ({len(cam_list)} caméra(s)) — tous gestes activés, cooldown 1 min"})
+
 def envoyer_push_notifications(client_id, titre, corps, data_extra=None):
     """Envoie une notification push Expo à tous les tokens du client."""
     try:
@@ -1816,4 +1860,85 @@ def supervision_agents():
     # Incidents non lus
     cur.execute("""
         SELECT i.*, c.nom_magasin FROM agents_incidents i
-        L
+        LEFT JOIN clients c ON c.id=i.client_id
+        WHERE i.lu=FALSE ORDER BY i.created_at DESC LIMIT 50
+    """)
+    incidents = [dict(r) for r in cur.fetchall()]
+    # Marquer comme lus
+    cur.execute("UPDATE agents_incidents SET lu=TRUE WHERE lu=FALSE")
+    cur.execute("SELECT * FROM clients ORDER BY nom_magasin")
+    clients_list = [dict(c) for c in cur.fetchall()]
+    conn.commit(); cur.close(); conn.close()
+
+    # Calculer statut visuel
+    for a in agents:
+        mins = float(a.get("minutes_inactif") or 999)
+        a["statut_visuel"] = "online" if mins < 10 else ("warn" if mins < 60 else "offline")
+        a["last_seen_str"] = str(a.get("last_seen",""))[:16]
+
+    for i in incidents:
+        i["created_at_str"] = str(i.get("created_at",""))[:16]
+
+    return render_template("agents.html",
+                           agents=agents, incidents=incidents,
+                           clients_list=clients_list,
+                           nb_incidents=len(incidents))
+
+
+# =================================================================
+# API PC STATUS
+# =================================================================
+@app.route("/api/pc/heartbeat", methods=["POST"])
+def pc_heartbeat():
+    """Reçoit un ping de démarrage du PC surveillance — enregistre le statut et envoie une push notif."""
+    data = request.json or {}
+    lk = data.get("license_key", "")
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT * FROM clients WHERE license_key=%s", (lk,))
+    client = cur.fetchone()
+    if not client:
+        cur.close(); conn.close()
+        return jsonify({"error": "licence inconnue"}), 403
+    now = datetime.now().isoformat()
+    cur.execute("""
+        INSERT INTO pc_status (license_key, last_seen, ip, version, nb_cameras)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT(license_key) DO UPDATE SET
+            last_seen=EXCLUDED.last_seen, ip=EXCLUDED.ip,
+            version=EXCLUDED.version, nb_cameras=EXCLUDED.nb_cameras
+    """, (lk, now, data.get("ip",""), data.get("version",""), data.get("nb_cameras",0)))
+    conn.commit()
+    try:
+        import threading
+        nb_cam = data.get("nb_cameras", 0)
+        threading.Thread(
+            target=envoyer_push_notifications,
+            args=(client["id"], "PC RadarIA connecte",
+                  f"Surveillance demarree — {nb_cam} camera(s) active(s)"),
+            daemon=True
+        ).start()
+    except Exception:
+        pass
+    cur.execute("SELECT statut FROM clients WHERE license_key=%s", (lk,))
+    statut_row = cur.fetchone()
+    cur.close(); conn.close()
+    return jsonify({"ok": True, "statut_licence": statut_row["statut"] if statut_row else "inconnu"})
+
+
+@app.route("/api/pc/statut")
+def pc_statut():
+    """Retourne le statut de la licence pour un PC donné."""
+    lk = request.args.get("license_key", "")
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT statut FROM clients WHERE license_key=%s", (lk,))
+    client = cur.fetchone()
+    cur.close(); conn.close()
+    if not client:
+        return jsonify({"statut": "inconnu"}), 403
+    return jsonify({"statut": client["statut"]})
+
+# =================================================================
+# MAIN
+# =================================================================
+init_db()
+if __name__ == "__main__":
