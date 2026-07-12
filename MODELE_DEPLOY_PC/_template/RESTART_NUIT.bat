@@ -27,8 +27,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 REM --- 3. Relancer surveillance.py ---
 echo [%date% %time%] Relance surveillance.py... >> %LOG%
-cd /d %SURV_DIR%
-start /MIN python surveillance.py
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Start-Process -FilePath 'python' -ArgumentList '%SURV_PATH%' -WorkingDirectory '%SURV_DIR%' -WindowStyle Minimized" >> %LOG% 2>&1
 
 echo [%date% %time%] === RESTART NUIT TERMINE === >> %LOG%
 echo. >> %LOG%

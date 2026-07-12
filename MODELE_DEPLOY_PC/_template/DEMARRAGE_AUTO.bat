@@ -1,14 +1,27 @@
 @echo off
 REM =====================================================
 REM  RadarIA — Demarrage automatique au boot Windows
-REM  Place ce raccourci dans :
-REM  C:\Users\%USERNAME%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\
+REM  Installe automatiquement par SETUP_RADARIA.bat dans :
+REM  %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\
 REM =====================================================
 title RadarIA — Auto-demarrage
 
-REM Attendre que le reseau soit disponible (30s)
-echo Attente connexion reseau...
-timeout /t 30 /nobreak >nul
+REM Attendre que le reseau soit disponible (45s)
+echo [RadarIA] Attente connexion reseau (45s)...
+timeout /t 45 /nobreak >nul
 
-REM Lancer la surveillance en arriere-plan
-start "RadarIA Surveillance" /min "%~dp0LANCER_SURVEILLANCE.bat"
+REM Calculer le dossier racine RadarIA (parent de ce BAT ou C:\radaria-client)
+set ROOT_DIR=%~dp0
+
+REM Lancer la surveillance en arriere-plan via PowerShell (compatible session non-interactive)
+echo [RadarIA] Lancement surveillance...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Start-Process -FilePath 'python' -ArgumentList '%ROOT_DIR%RadarIA_PC\surveillance.py' -WorkingDirectory '%ROOT_DIR%RadarIA_PC' -WindowStyle Minimized"
+
+REM Attendre 5s puis lancer le gardien en daemon
+timeout /t 5 /nobreak >nul
+echo [RadarIA] Lancement gardien...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Start-Process -FilePath 'python' -ArgumentList '%ROOT_DIR%gardien_radaria.py --daemon' -WorkingDirectory '%ROOT_DIR%' -WindowStyle Minimized"
+
+echo [RadarIA] Systeme lance avec succes.

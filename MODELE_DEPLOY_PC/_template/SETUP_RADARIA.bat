@@ -50,14 +50,28 @@ if errorlevel 1 (
 )
 echo.
 
-echo  [4/5] Configuration redemarrage automatique nuit (3h00)...
+echo  [4/6] Configuration redemarrage automatique nuit (3h00)...
 echo.
-set BAT_RESTART=%~dp0..\RESTART_NUIT.bat
+set BAT_RESTART=%~dp0RESTART_NUIT.bat
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$a = New-ScheduledTaskAction -Execute '%BAT_RESTART%'; $t = New-ScheduledTaskTrigger -Daily -At '03:00'; $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5); Register-ScheduledTask -TaskName 'RadarIA_Restart_Nuit' -Action $a -Trigger $t -Settings $s -RunLevel Limited -Force | Out-Null; Write-Host '  Tache planifiee OK - Redemarrage chaque nuit a 3h00'"
+  "$a = New-ScheduledTaskAction -Execute '%BAT_RESTART%'; $t = New-ScheduledTaskTrigger -Daily -At '03:00'; $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName 'RadarIA_Restart_Nuit' -Action $a -Trigger $t -Settings $s -RunLevel Limited -Force | Out-Null; Write-Host '  Tache planifiee OK - Redemarrage chaque nuit a 3h00'"
 echo.
 
-echo  [5/5] Setup termine !
+echo  [5/6] Installation demarrage automatique au boot Windows...
+echo.
+set STARTUP_FOLDER=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
+set DEMARRAGE_BAT=%~dp0DEMARRAGE_AUTO.bat
+copy /Y "%DEMARRAGE_BAT%" "%STARTUP_FOLDER%\RadarIA_Demarrage.bat" >nul
+if errorlevel 1 (
+    echo  AVERT : Copie startup impossible, creation tache planifiee au login...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$a = New-ScheduledTaskAction -Execute '%DEMARRAGE_BAT%'; $t = New-ScheduledTaskTrigger -AtLogOn; $s = New-ScheduledTaskSettingsSet -StartWhenAvailable; Register-ScheduledTask -TaskName 'RadarIA_Demarrage_Auto' -Action $a -Trigger $t -Settings $s -RunLevel Limited -Force | Out-Null; Write-Host '  Tache demarrage OK'"
+) else (
+    echo  Demarrage auto installe dans le dossier Startup Windows.
+)
+echo.
+
+echo  [6/6] Setup termine !
 echo.
 echo  =======================================================
 echo    Le rapport s'est ouvert dans votre navigateur.
