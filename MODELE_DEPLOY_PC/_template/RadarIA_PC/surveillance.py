@@ -1321,6 +1321,19 @@ def _ping_backoffice_demarrage():
         logger.warning(f"[PING] Echec ping backoffice: {e}")
 
 
+@app.route("/snap/<cam_id>")
+def snap_image(cam_id):
+    """Retourne le dernier frame JPEG de la caméra (snapshot statique, rafraîchi par le dashboard)."""
+    cam = cameras.get(cam_id)
+    if not cam:
+        return "", 404
+    with cam.lock:
+        fr = cam.frame
+    if not fr:
+        return "", 404
+    return Response(fr, mimetype="image/jpeg")
+
+
 if __name__ == "__main__":
     import socket
     ip = socket.gethostbyname(socket.gethostname())
