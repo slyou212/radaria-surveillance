@@ -293,15 +293,21 @@ def etat_cameras(cfg):
     cameras = cfg.get("cameras", [])
     if not cameras:
         return []
+    # Accepter dict ou list
+    if isinstance(cameras, dict):
+        cameras = list(cameras.values())
     resultats = []
-    for cam in cameras:
-        rtsp = cam.get("rtsp")
+    for i, cam in enumerate(cameras):
+        # Compatibilité ancien format (index/rtsp) et nouveau (id/url)
+        cam_id  = cam.get("id") or cam.get("index") or str(i + 1)
+        cam_nom = cam.get("nom", "?")
+        rtsp    = cam.get("url") or cam.get("rtsp")
         if rtsp:
             ok = tester_camera_rtsp(rtsp)
-            resultats.append({"index": cam["index"], "nom": cam.get("nom","?"),
+            resultats.append({"index": cam_id, "nom": cam_nom,
                                "ok": ok, "rtsp": rtsp[:60]+"..."})
         else:
-            resultats.append({"index": cam["index"], "nom": cam.get("nom","?"),
+            resultats.append({"index": cam_id, "nom": cam_nom,
                                "ok": None, "info": "pas de RTSP"})
     return resultats
 
