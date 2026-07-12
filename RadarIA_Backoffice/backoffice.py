@@ -1275,6 +1275,41 @@ def api_mobile_alertes():
                     "nb_cameras":inst["nb_cameras"] if inst else 0,
                     "last_seen":inst["last_seen"] if inst else ""})
 
+@app.route("/api/mobile/push-test", methods=["POST"])
+@limiter.limit("10 per minute")
+def api_mobile_push_test():
+    """Test push notification — envoie une notif de test au client connecté."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as n FROM push_tokens WHERE client_id=%s", (client_id,))
+    n = cur.fetchone()["n"]
+    cur.execute("SELECT token FROM push_tokens WHERE client_id=%s", (client_id,))
+    tokens = [r["token"] for r in cur.fetchall()]
+    cur.close(); conn.close()
+    if not tokens:
+        return jsonify({"ok":False,"tokens_count":0,
+                        "message":"Aucun token enregistre — ouvre l'app pour enregistrer le token push"})
+    import threading
+    threading.Thread(
+        target=envoyer_push_notifications,
+        args=(client_id, "🔔 Test RadarIA", "Si tu vois cette notification, les push fonctionnent !"),
+        daemon=True
+    ).start()
+    return jsonify({"ok":True,"tokens_count":n,"message":f"Notification de test envoyee a {n} appareil(s)"})
+
+@app.route("/api/mobile/push-status", methods=["GET"])
+@limiter.limit("30 per minute")
+def api_mobile_push_status():
+    """Vérifie combien de tokens push sont enregistrés pour ce client."""
+    client_id = get_mobile_client_id()
+    if not client_id: return jsonify({"error":"Authentification requise"}),401
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT token, platform, created_at, updated_at FROM push_tokens WHERE client_id=%s", (client_id,))
+    tokens = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify({"ok":True,"client_id":client_id,"tokens":tokens,"count":len(tokens)})
+
 @app.route("/api/mobile/status", methods=["GET"])
 @limiter.limit("60 per minute")
 def api_mobile_status():
@@ -1719,16 +1754,26 @@ def envoyer_push_notifications(client_id, titre, corps, data_extra=None):
         cur.execute("SELECT token FROM push_tokens WHERE client_id=%s", (client_id,))
         tokens = [r["token"] for r in cur.fetchall()]
         cur.close(); conn.close()
-        if not tokens: return
+        print(f"[PUSH] client_id={client_id} — {len(tokens)} token(s) en base")
+        if not tokens:
+            print(f"[PUSH] ATTENTION: aucun token enregistre pour client_id={client_id}")
+            return
         messages = [{"to":t,"title":titre,"body":corps,"sound":"default",
                      "data":data_extra or {}} for t in tokens]
         payload = _json.dumps(messages).encode()
         req = urllib.request.Request(
             "https://exp.host/--/api/v2/push/send",
             data=payload,
-            headers={"Content-Type":"application/json","Accept":"application/json"}
+            headers={"Content-Type":"application/json","Accept":"application/json",
+                     "Accept-Encoding":"gzip, deflate"}
         )
-        urllib.request.urlopen(req, timeout=5)
+        resp = urllib.request.urlopen(req, timeout=15)
+        result = _json.loads(resp.read().decode())
+        print(f"[PUSH] Expo reponse: {result}")
+        # Vérifier les erreurs token par token
+        for item in result.get("data", []):
+            if item.get("status") == "error":
+                print(f"[PUSH] Token invalide: {item.get('details',{}).get('error','?')} — {item.get('message','')}")
     except Exception as e:
         print(f"[PUSH] Erreur envoi notifications: {e}")
 
@@ -1882,13 +1927,20 @@ def api_deployer_tous():
 def supervision_agents():
     """Page de supervision de tous les Gardiens PC."""
     conn = get_db(); cur = conn.cursor()
-    # Agents avec infos client
+    # Agents avec infos client — last_seen = max(gardien, surveillance.py)
     cur.execute("""
         SELECT a.*, c.nom_magasin,
-               EXTRACT(EPOCH FROM (NOW()-a.last_seen))/60 AS minutes_inactif
+               GREATEST(a.last_seen, i.last_seen::TIMESTAMP) AS last_seen_effective,
+               EXTRACT(EPOCH FROM (NOW()-GREATEST(a.last_seen, COALESCE(i.last_seen::TIMESTAMP, a.last_seen))))/60 AS minutes_inactif,
+               CASE WHEN i.last_seen IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (NOW()-i.last_seen::TIMESTAMP))/60
+                    ELSE 999 END AS minutes_surv_inactif,
+               i.statut AS surv_statut,
+               i.cameras_actives, i.nb_cameras
         FROM agents_pc a
         LEFT JOIN clients c ON c.id = a.client_id
-        ORDER BY a.last_seen DESC
+        LEFT JOIN installations i ON i.client_id = a.client_id
+        ORDER BY GREATEST(a.last_seen, COALESCE(i.last_seen::TIMESTAMP, a.last_seen)) DESC
     """)
     agents = [dict(r) for r in cur.fetchall()]
     # Incidents non lus
@@ -1904,11 +1956,23 @@ def supervision_agents():
     clients_list = [dict(c) for c in cur.fetchall()]
     conn.commit(); cur.close(); conn.close()
 
-    # Calculer statut visuel
+    # Calculer statut visuel (gardien OU surveillance.py)
     for a in agents:
         mins = float(a.get("minutes_inactif") or 999)
-        a["statut_visuel"] = "online" if mins < 10 else ("warn" if mins < 60 else "offline")
-        a["last_seen_str"] = str(a.get("last_seen",""))[:16]
+        mins_surv = float(a.get("minutes_surv_inactif") or 999)
+        # Online si gardien récent OU surveillance.py récente (< 10 min)
+        if mins < 10 or mins_surv < 10:
+            a["statut_visuel"] = "online"
+        elif mins < 60 or mins_surv < 60:
+            a["statut_visuel"] = "warn"
+        else:
+            a["statut_visuel"] = "offline"
+        # Surveillance active si l'une des deux sources est récente
+        if not a.get("surveillance_active") and mins_surv < 10:
+            a["surveillance_active"] = True
+        # Afficher last_seen effective
+        ls = a.get("last_seen_effective") or a.get("last_seen")
+        a["last_seen_str"] = str(ls)[:16] if ls else ""
 
     for i in incidents:
         i["created_at_str"] = str(i.get("created_at",""))[:16]
@@ -2008,7 +2072,7 @@ def api_calibration(license_key):
         else:
             faux_rate = (r["faux_positifs"] or 0) / total_eval
             if faux_rate >= 0.70:
-                statut = "silence"
+                statut = "prudent"  # Jamais "silence" — max autorisé = prudent
             elif faux_rate >= 0.45:
                 statut = "prudent"
             else:

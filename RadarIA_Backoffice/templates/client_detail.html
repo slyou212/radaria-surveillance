@@ -24,72 +24,218 @@
 <!-- Infos client -->
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
   <div class="card">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Informations</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Informations</div>
     <table>
-      <tr><td style="color:#666;width:140px">Statut</td><td>
+      <tr><td style="color:#9CA3AF;width:140px">Statut</td><td>
         {% if client.statut == 'actif' %}<span class="badge badge-green">Actif</span>
         {% elif client.statut == 'suspendu' %}<span class="badge badge-orange">Suspendu</span>
         {% else %}<span class="badge badge-gray">Inactif</span>{% endif %}
       </td></tr>
-      <tr><td style="color:#666">Contact</td><td>{{ client.contact_nom or '—' }}</td></tr>
-      <tr><td style="color:#666">Téléphone</td><td>{{ client.contact_tel or '—' }}</td></tr>
-      <tr><td style="color:#666">Email</td><td>{{ client.contact_email or '—' }}</td></tr>
-      <tr><td style="color:#666">Adresse</td><td>{{ client.adresse or '—' }}</td></tr>
-      <tr><td style="color:#666">SIRET</td><td style="font-family:monospace">{{ client.siret or '—' }}</td></tr>
-      <tr><td style="color:#666">Username</td><td style="font-family:monospace">{{ client.username }}</td></tr>
-      <tr><td style="color:#666">License Key</td><td style="font-family:monospace;font-size:11px;color:#e74c3c">{{ client.license_key }}</td></tr>
-      <tr><td style="color:#666">Prix mensuel</td><td>{{ client.prix_mensuel }}€</td></tr>
-      <tr><td style="color:#666">Contrat</td><td>{{ client.contrat_debut or '?' }} → {{ client.contrat_fin or '?' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Contact</td><td>{{ client.contact_nom or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Téléphone</td><td>{{ client.contact_tel or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Email</td><td>{{ client.contact_email or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Adresse</td><td>{{ client.adresse or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">SIRET</td><td style="font-family:monospace">{{ client.siret or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Username</td><td style="font-family:monospace">{{ client.username }}</td></tr>
+      <tr><td style="color:#9CA3AF">License Key</td><td style="font-family:monospace;font-size:11px;color:#3b4fd8">{{ client.license_key }}</td></tr>
+      <tr><td style="color:#9CA3AF">Prix mensuel</td><td>{{ client.prix_mensuel }}€</td></tr>
+      <tr><td style="color:#9CA3AF">Contrat</td><td>{{ client.contrat_debut or '?' }} → {{ client.contrat_fin or '?' }}</td></tr>
     </table>
   </div>
   <div class="card">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Installation PC</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Installation PC</div>
     {% if installation %}
     <table>
-      <tr><td style="color:#666;width:140px">Statut</td><td>
+      <tr><td style="color:#9CA3AF;width:140px">Statut</td><td>
         {% if installation.statut == 'online' %}<span class="badge badge-green">🟢 En ligne</span>
         {% else %}<span class="badge badge-gray">⚫ Hors ligne</span>{% endif %}
       </td></tr>
-      <tr><td style="color:#666">Hostname</td><td>{{ installation.pc_hostname or '—' }}</td></tr>
-      <tr><td style="color:#666">IP locale</td><td style="font-family:monospace">{{ installation.ip_locale or '—' }}</td></tr>
-      <tr><td style="color:#666">IP publique</td><td style="font-family:monospace">{{ installation.ip_publique or '—' }}</td></tr>
-      <tr><td style="color:#666">Caméras</td><td>{{ installation.cameras_actives }}/{{ installation.nb_cameras }}</td></tr>
-      <tr><td style="color:#666">Dernière vue</td><td style="font-size:12px">{{ installation.last_seen[:16].replace('T',' ') if installation.last_seen else '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Hostname</td><td>{{ installation.pc_hostname or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">IP locale</td><td style="font-family:monospace">{{ installation.ip_locale or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">IP publique</td><td style="font-family:monospace">{{ installation.ip_publique or '—' }}</td></tr>
+      <tr><td style="color:#9CA3AF">Caméras</td><td>{{ installation.cameras_actives }}/{{ installation.nb_cameras }}</td></tr>
+      <tr><td style="color:#9CA3AF">Dernière vue</td><td style="font-size:12px">{{ installation.last_seen[:16].replace('T',' ') if installation.last_seen else '—' }}</td></tr>
     </table>
     {% else %}
-    <div style="color:#555;text-align:center;padding:20px">Aucune installation enregistrée</div>
+    <div style="color:#9CA3AF;text-align:center;padding:20px">Aucune installation enregistrée</div>
     {% endif %}
   </div>
 </div>
 
+<!-- App Mobile -->
+<div class="card" style="margin-bottom:24px;border-left:4px solid #3b4fd8">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div style="color:#3b4fd8;font-size:13px;font-weight:700;letter-spacing:.05em">📱 IDENTIFIANTS APP MOBILE</div>
+    <span style="font-size:11px;color:#9CA3AF">Le client utilise ces identifiants pour se connecter à l'app RadarIA</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <!-- Username -->
+    <div style="background:#F0FDF4;border-radius:10px;padding:14px;border:1px solid #BBF7D0">
+      <div style="color:#9CA3AF;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Identifiant</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code id="app-username" style="color:#16a34a;font-size:16px;font-weight:700;flex:1">{{ client.username }}</code>
+        <button onclick="copyText('app-username','btn-copy-user')" id="btn-copy-user"
+          style="background:#FFFFFF;border:1px solid #BBF7D0;color:#16a34a;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px">
+          📋 Copier
+        </button>
+      </div>
+    </div>
+    <!-- Mot de passe -->
+    <div style="background:#F9FAFB;border-radius:10px;padding:14px;border:1px solid #E5E7EB">
+      <div style="color:#9CA3AF;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Mot de passe</div>
+      <form method="post" action="/client/{{ client.id }}/reset-password" style="display:flex;gap:6px">
+        <input type="text" name="new_password" placeholder="Nouveau mot de passe..."
+          style="flex:1;background:#FFFFFF;border:1px solid #D1D5DB;border-radius:6px;padding:6px 10px;color:#111827;font-size:13px">
+        <button type="submit"
+          style="background:#EFF2FE;border:1px solid #C7D2FE;color:#3b4fd8;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">
+          ↻ Changer
+        </button>
+      </form>
+      <div style="color:#D1D5DB;font-size:10px;margin-top:6px">Laissez vide pour ne pas changer — envoyez le nouveau mot de passe au client manuellement</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function copyText(elemId, btnId) {
+  const txt = document.getElementById(elemId).innerText;
+  navigator.clipboard.writeText(txt).then(() => {
+    const btn = document.getElementById(btnId);
+    const orig = btn.innerText;
+    btn.innerText = '✅ Copié !';
+    setTimeout(() => btn.innerText = orig, 2000);
+  });
+}
+</script>
+
 <!-- Snapshots -->
 {% if snapshots %}
 <div class="card" style="margin-bottom:24px">
-  <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">📷 Snapshots caméras</div>
+  <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">📷 Snapshots caméras</div>
   <div style="display:flex;flex-wrap:wrap;gap:8px">
     {% for s in snapshots %}
-    <img src="/snapshots/{{ client_id }}/{{ s }}" style="width:180px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #1a1a3a">
+    <img src="/snapshots/{{ client_id }}/{{ s }}" style="width:180px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #E5E7EB">
     {% endfor %}
   </div>
 </div>
 {% endif %}
 
+<!-- Analyse IA — Jauge feedback -->
+{% set sg = stats_globales %}
+{% set total_feedback = (sg.confirmes + sg.faux_positifs) %}
+<div class="card" style="margin-bottom:24px;border-left:4px solid #3b4fd8">
+  <div style="color:#3b4fd8;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:16px">🤖 ANALYSE IA — PRÉCISION DES DÉTECTIONS</div>
+
+  <!-- 4 cartes stats globales -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    <div style="background:#F8F9FA;border-radius:10px;padding:14px;border:1px solid #E5E7EB;text-align:center">
+      <div style="font-size:28px;font-weight:700;color:#111827">{{ sg.total }}</div>
+      <div style="font-size:11px;color:#6B7280;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">Total alertes</div>
+    </div>
+    <div style="background:#F0FDF4;border-radius:10px;padding:14px;border:1px solid #BBF7D0;text-align:center">
+      <div style="font-size:28px;font-weight:700;color:#16a34a">{{ sg.confirmes }}</div>
+      <div style="font-size:11px;color:#16a34a;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">✅ Vols confirmés</div>
+    </div>
+    <div style="background:#FEF2F2;border-radius:10px;padding:14px;border:1px solid #FECACA;text-align:center">
+      <div style="font-size:28px;font-weight:700;color:#DC2626">{{ sg.faux_positifs }}</div>
+      <div style="font-size:11px;color:#DC2626;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">❌ Faux positifs</div>
+    </div>
+    <div style="background:#F9FAFB;border-radius:10px;padding:14px;border:1px solid #E5E7EB;text-align:center">
+      <div style="font-size:28px;font-weight:700;color:#9CA3AF">{{ sg.sans_retour }}</div>
+      <div style="font-size:11px;color:#9CA3AF;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">⬜ Sans retour</div>
+    </div>
+  </div>
+
+  <!-- Barre de précision -->
+  {% if total_feedback > 0 %}
+  {% set pct_ok = (sg.confirmes / total_feedback * 100)|int %}
+  <div style="margin-bottom:20px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+      <span style="font-size:12px;font-weight:600;color:#111827">Précision sur alertes évaluées ({{ total_feedback }})</span>
+      <span style="font-size:13px;font-weight:700;color:{% if pct_ok >= 70 %}#16a34a{% elif pct_ok >= 40 %}#f59e0b{% else %}#DC2626{% endif %}">
+        {{ pct_ok }}% vraies alertes
+      </span>
+    </div>
+    <div style="height:12px;background:#FEE2E2;border-radius:6px;overflow:hidden">
+      <div style="height:100%;width:{{ pct_ok }}%;background:{% if pct_ok >= 70 %}#16a34a{% elif pct_ok >= 40 %}#f59e0b{% else %}#DC2626{% endif %};border-radius:6px"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px">
+      <span style="font-size:10px;color:#16a34a">{{ sg.confirmes }} confirmés</span>
+      <span style="font-size:10px;color:#DC2626">{{ sg.faux_positifs }} faux positifs</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Breakdown par geste -->
+  {% if stats_par_geste %}
+  <div style="color:#9CA3AF;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Détail par type de geste</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Type de geste</th>
+        <th style="text-align:center">Total</th>
+        <th style="text-align:center">✅ Confirmés</th>
+        <th style="text-align:center">❌ Faux positifs</th>
+        <th style="text-align:center">⬜ Sans retour</th>
+        <th style="text-align:center">Précision</th>
+        <th style="text-align:center">Statut IA</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in stats_par_geste %}
+      {% set g_eval = g.confirmes + g.faux_positifs %}
+      {% set g_pct = (g.confirmes / g_eval * 100)|int if g_eval > 0 else -1 %}
+      {% set g_attente = g.total - g.confirmes - g.faux_positifs %}
+      <tr>
+        <td><span class="badge badge-red">{{ g.type }}</span></td>
+        <td style="text-align:center;font-weight:600">{{ g.total }}</td>
+        <td style="text-align:center;color:#16a34a;font-weight:600">{{ g.confirmes }}</td>
+        <td style="text-align:center;color:#DC2626;font-weight:600">{{ g.faux_positifs }}</td>
+        <td style="text-align:center;color:#9CA3AF">{{ g_attente }}</td>
+        <td style="text-align:center">
+          {% if g_pct >= 0 %}
+          <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;
+            background:{% if g_pct >= 70 %}#F0FDF4{% elif g_pct >= 40 %}#FFFBEB{% else %}#FEF2F2{% endif %};
+            color:{% if g_pct >= 70 %}#16a34a{% elif g_pct >= 40 %}#f59e0b{% else %}#DC2626{% endif %};
+            border:1px solid {% if g_pct >= 70 %}#BBF7D0{% elif g_pct >= 40 %}#FDE68A{% else %}#FECACA{% endif %}">
+            {{ g_pct }}%
+          </span>
+          {% else %}
+          <span style="color:#D1D5DB;font-size:11px">—</span>
+          {% endif %}
+        </td>
+        <td style="text-align:center">
+          {% if g_eval < 5 %}
+          <span style="font-size:11px;color:#9CA3AF">⬜ En cours</span>
+          {% elif g_pct >= 55 %}
+          <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:#F0FDF4;color:#16a34a;border:1px solid #BBF7D0">🟢 Actif</span>
+          {% elif g_pct >= 30 %}
+          <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:#FFFBEB;color:#d97706;border:1px solid #FDE68A">🟡 Prudent</span>
+          {% else %}
+          <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA">🔴 Silence</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
 <!-- Alertes -->
 <div class="card" style="margin-bottom:24px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">🚨 Alertes récentes</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em">🚨 Alertes récentes (50 dernières)</div>
     {% if feedback_stats.total > 0 %}
     <div style="display:flex;gap:8px;align-items:center">
-      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#1e3a1e;color:#4ade80;font-weight:600">
-        ✅ Vol confirmé : {{ feedback_stats.vol }}
-        {% if feedback_stats.total > 0 %}({{ (feedback_stats.vol / feedback_stats.total * 100)|int }}%){% endif %}
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#F0FDF4;color:#16a34a;font-weight:600;border:1px solid #BBF7D0">
+        ✅ {{ feedback_stats.vol }}
       </span>
-      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#3a1e1e;color:#f87171;font-weight:600">
-        ❌ Faux positif : {{ feedback_stats.faux }}
-        {% if feedback_stats.total > 0 %}({{ (feedback_stats.faux / feedback_stats.total * 100)|int }}%){% endif %}
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#FEF2F2;color:#DC2626;font-weight:600;border:1px solid #FECACA">
+        ❌ {{ feedback_stats.faux }}
       </span>
-      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#2a2a2a;color:#888;font-weight:600">
-        ⬜ Sans retour : {{ feedback_stats.aucun }}
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:#F3F4F6;color:#6B7280;font-weight:600;border:1px solid #E5E7EB">
+        ⬜ {{ feedback_stats.aucun }}
       </span>
     </div>
     {% endif %}
@@ -103,15 +249,15 @@
         <td style="font-family:monospace;font-size:12px">{{ a.date }}</td>
         <td style="font-family:monospace;font-size:12px">{{ a.heure }}</td>
         <td><span class="badge badge-red">{{ a.type }}</span></td>
-        <td style="color:#aaa">{{ a.camera }}</td>
-        <td>{% if a.video_url %}<a href="{{ a.video_url }}" target="_blank" style="background:#1a1a3a;color:#7b8cde;border:1px solid #2a2a5a;border-radius:6px;padding:3px 10px;font-size:11px;text-decoration:none;white-space:nowrap">▶ Vidéo</a>{% else %}<span style="color:#333;font-size:11px">—</span>{% endif %}</td>
+        <td style="color:#9CA3AF">{{ a.camera }}</td>
+        <td>{% if a.video_url %}<a href="{{ a.video_url }}" target="_blank" style="background:#EFF2FE;color:#3b4fd8;border:1px solid #C7D2FE;border-radius:6px;padding:3px 10px;font-size:11px;text-decoration:none;white-space:nowrap">▶ Vidéo</a>{% else %}<span style="color:#D1D5DB;font-size:11px">—</span>{% endif %}</td>
         <td>
           {% if a._fb_type == 'vol' %}
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#1e3a1e;color:#4ade80;font-weight:600">✅ Vol confirmé</span>
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#F0FDF4;color:#16a34a;font-weight:600;border:1px solid #BBF7D0">✅ Vol confirmé</span>
           {% elif a._fb_type == 'faux' %}
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#3a1e1e;color:#f87171;font-weight:600">❌ Faux positif</span>
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:10px;background:#FEF2F2;color:#DC2626;font-weight:600;border:1px solid #FECACA">❌ Faux positif</span>
           {% else %}
-          <span style="color:#444;font-size:11px">—</span>
+          <span style="color:#D1D5DB;font-size:11px">—</span>
           {% endif %}
         </td>
       </tr>
@@ -119,37 +265,37 @@
     </tbody>
   </table>
   {% else %}
-  <div style="color:#555;text-align:center;padding:20px">Aucune alerte</div>
+  <div style="color:#9CA3AF;text-align:center;padding:20px">Aucune alerte</div>
   {% endif %}
 </div>
 
 <!-- Interventions -->
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
   <div class="card">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">🔧 Interventions</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">🔧 Interventions</div>
     {% if interventions %}
     <table>
       <thead><tr><th>Date</th><th>Type</th><th>Durée</th></tr></thead>
       <tbody>
         {% for i in interventions %}
         <tr>
-          <td style="font-size:12px;color:#666">{{ i.date }}</td>
+          <td style="font-size:12px;color:#9CA3AF">{{ i.date }}</td>
           <td>{{ i.type }}</td>
-          <td style="color:#666">{{ i.duree_min }}min</td>
+          <td style="color:#9CA3AF">{{ i.duree_min }}min</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <div style="color:#555;font-size:13px">Aucune intervention</div>
+    <div style="color:#9CA3AF;font-size:13px">Aucune intervention</div>
     {% endif %}
-    <form method="post" action="/client/{{ client.id }}/intervention" style="margin-top:16px;border-top:1px solid #1a1a3a;padding-top:16px">
+    <form method="post" action="/client/{{ client.id }}/intervention" style="margin-top:16px;border-top:1px solid #E5E7EB;padding-top:16px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <select name="type" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <select name="type" style="background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px">
           <option>Installation</option><option>Maintenance</option><option>Support</option><option>Dépannage</option>
         </select>
-        <input name="duree_min" type="number" placeholder="Durée (min)" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
-        <textarea name="description" placeholder="Description..." rows="2" style="grid-column:1/-1;background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px;resize:vertical"></textarea>
+        <input name="duree_min" type="number" placeholder="Durée (min)" style="background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px">
+        <textarea name="description" placeholder="Description..." rows="2" style="grid-column:1/-1;background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px;resize:vertical"></textarea>
         <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/-1">+ Ajouter intervention</button>
       </div>
     </form>
@@ -157,7 +303,7 @@
 
   <!-- Factures -->
   <div class="card">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">💰 Factures</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">💰 Factures</div>
     {% if factures %}
     <table>
       <thead><tr><th>Mois</th><th>Montant</th><th>Statut</th><th></th></tr></thead>
@@ -182,13 +328,13 @@
       </tbody>
     </table>
     {% else %}
-    <div style="color:#555;font-size:13px">Aucune facture</div>
+    <div style="color:#9CA3AF;font-size:13px">Aucune facture</div>
     {% endif %}
-    <form method="post" action="/client/{{ client.id }}/facture" style="margin-top:16px;border-top:1px solid #1a1a3a;padding-top:16px">
+    <form method="post" action="/client/{{ client.id }}/facture" style="margin-top:16px;border-top:1px solid #E5E7EB;padding-top:16px">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <input name="mois" type="number" placeholder="Mois" min="1" max="12" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
-        <input name="annee" type="number" placeholder="Année" value="2026" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
-        <input name="montant" type="number" step="0.01" placeholder="Montant €" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
+        <input name="mois" type="number" placeholder="Mois" min="1" max="12" style="background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px">
+        <input name="annee" type="number" placeholder="Année" value="2026" style="background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px">
+        <input name="montant" type="number" step="0.01" placeholder="Montant €" style="background:#FFFFFF;border:1px solid #D1D5DB;border-radius:8px;padding:8px;color:#111827;font-size:13px">
         <button type="submit" class="btn btn-primary btn-sm" style="grid-column:1/-1">+ Ajouter facture</button>
       </div>
     </form>
@@ -198,7 +344,7 @@
 <!-- Contrats -->
 <div class="card" style="margin-bottom:24px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">📄 Contrats</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em">📄 Contrats</div>
     <form method="post" action="/client/{{ client.id }}/contrat/generer" style="display:inline">
       <button type="submit" class="btn btn-primary btn-sm">+ Générer contrat</button>
     </form>
@@ -209,16 +355,16 @@
     <tbody>
       {% for c in contrats %}
       <tr>
-        <td style="font-family:monospace;font-size:12px;color:#7b8cde">{{ c.numero }}</td>
-        <td style="font-size:12px;color:#666">{{ c.date_creation[:10] if c.date_creation else '—' }}</td>
-        <td style="font-size:12px;color:#666">{{ c.date_envoi[:10] if c.date_envoi else '—' }}</td>
+        <td style="font-family:monospace;font-size:12px;color:#3b4fd8">{{ c.numero }}</td>
+        <td style="font-size:12px;color:#9CA3AF">{{ c.date_creation[:10] if c.date_creation else '—' }}</td>
+        <td style="font-size:12px;color:#9CA3AF">{{ c.date_envoi[:10] if c.date_envoi else '—' }}</td>
         <td>
           {% if c.statut == 'signe' %}<span class="badge badge-green">✔ Signé</span>
           {% elif c.statut == 'envoye' %}<span class="badge badge-orange">📤 Envoyé</span>
           {% elif c.statut == 'genere' %}<span class="badge badge-gray">📄 Généré</span>
           {% else %}<span class="badge badge-gray">Brouillon</span>{% endif %}
         </td>
-        <td style="font-size:12px;color:#aaa">{{ c.signe_par or '—' }}</td>
+        <td style="font-size:12px;color:#9CA3AF">{{ c.signe_par or '—' }}</td>
         <td style="white-space:nowrap">
           <a href="/contrat/{{ c.id }}/pdf" class="btn btn-secondary btn-sm" title="Télécharger PDF">⬇ PDF</a>
           {% if c.statut != 'signe' and client.contact_email %}
@@ -232,14 +378,14 @@
     </tbody>
   </table>
   {% else %}
-  <div style="color:#555;text-align:center;padding:20px;font-size:13px">Aucun contrat — cliquez sur "+ Générer contrat"</div>
+  <div style="color:#9CA3AF;text-align:center;padding:20px;font-size:13px">Aucun contrat — cliquez sur "+ Générer contrat"</div>
   {% endif %}
 </div>
 
 <!-- Sinistres -->
 <div class="card" id="sinistres" style="margin-bottom:24px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-    <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em">⚠️ Sinistres & Tickets</div>
+    <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em">⚠️ Sinistres & Tickets</div>
     <a href="/sinistres?client_id={{ client.id }}" style="color:#7b8cde;font-size:12px;text-decoration:none">Voir tout →</a>
   </div>
 
@@ -255,7 +401,7 @@
           {% elif s.origine == 'ia' %}<span class="badge" style="background:#2a1a4a;color:#c084fc">🤖 IA</span>
           {% else %}<span class="badge" style="background:#2a2a1a;color:#fbbf24">👤 Admin</span>{% endif %}
         </td>
-        <td style="font-size:12px;color:#666">{{ s.date_declaration }}</td>
+        <td style="font-size:12px;color:#9CA3AF">{{ s.date_declaration }}</td>
         <td>
           <span style="font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;
             {% if s.statut=='ouvert' %}background:#3a2500;color:#f59e0b
@@ -265,7 +411,7 @@
             {{ s.statut | upper }}
           </span>
         </td>
-        <td style="font-size:12px;color:#777;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.description or '—' }}</td>
+        <td style="font-size:12px;color:#6B7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.description or '—' }}</td>
         <td>
           <form method="post" action="/sinistre/{{ s.id }}/statut" style="display:inline-flex;gap:4px">
             <select name="statut" style="background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:3px 6px;color:#fff;font-size:11px">
@@ -282,12 +428,12 @@
     </tbody>
   </table>
   {% else %}
-  <div style="color:#555;font-size:13px;margin-bottom:16px">Aucun sinistre enregistré</div>
+  <div style="color:#9CA3AF;font-size:13px;margin-bottom:16px">Aucun sinistre enregistré</div>
   {% endif %}
 
   <!-- Formulaire nouveau sinistre (admin) -->
   <form method="post" action="/client/{{ client.id }}/sinistre" style="border-top:1px solid #1a1a3a;padding-top:14px">
-    <div style="color:#666;font-size:11px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Créer un ticket admin</div>
+    <div style="color:#9CA3AF;font-size:11px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Créer un ticket admin</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <select name="type" style="background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:8px;color:#fff;font-size:13px">
         <option>Vol</option><option>Vandalisme</option><option>Intrusion</option>
@@ -307,8 +453,9 @@
 <!-- Notes -->
 {% if client.notes %}
 <div class="card" style="margin-bottom:24px">
-  <div style="color:#666;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">📝 Notes internes</div>
-  <div style="color:#aaa;font-size:14px;white-space:pre-wrap">{{ client.notes }}</div>
+  <div style="color:#9CA3AF;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">📝 Notes internes</div>
+  <div style="color:#9CA3AF;font-size:14px;white-space:pre-wrap">{{ client.notes }}</div>
 </div>
 {% endif %}
 {% endblock %}
+                                                                

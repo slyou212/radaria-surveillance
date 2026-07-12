@@ -244,10 +244,10 @@ def _apprentissage_feedback(alerte, feedback_val):
         statuts = apprentissage.setdefault("statuts_par_type", {})
         ancien = statuts.get(typ, "actif")
         if ratio_faux_type >= 0.75:
-            # ≥75% faux positifs → silencer ce type (plus d'alertes)
-            statuts[typ] = "silence"
-            if ancien != "silence":
-                logger.warning(f"Type '{typ}' SILENCÉ par IA (ratio faux={ratio_faux_type:.0%} sur {total_type} feedbacks)")
+            # ≥75% faux positifs → prudent uniquement, JAMAIS silence complet
+            statuts[typ] = "prudent"
+            if ancien not in ("prudent", "silence"):
+                logger.info(f"Type '{typ}' en mode PRUDENT (ratio faux={ratio_faux_type:.0%} sur {total_type} feedbacks)")
         elif ratio_faux_type >= 0.50:
             # 50–75% faux positifs → mode prudent (délai x3)
             statuts[typ] = "prudent"
@@ -1034,8 +1034,8 @@ def api_type_statut_set(type_alerte):
     """Permet de forcer manuellement le statut d'un type (actif/silence/prudent)."""
     data = request.get_json(silent=True) or {}
     statut = data.get("statut", "actif")
-    if statut not in ("actif", "prudent", "silence"):
-        return jsonify({"error": "statut invalide"}), 400
+    if statut not in ("actif", "prudent"):
+        return jsonify({"error": "statut invalide — 'silence' est interdit"}), 400
     apprentissage.setdefault("statuts_par_type", {})[type_alerte] = statut
     _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
     logger.info(f"Statut type '{type_alerte}' force manuellement → {statut}")
@@ -1186,9 +1186,11 @@ def calibration_loop():
                 data = json.loads(resp.read().decode())
             statuts = data.get("statuts", {})
             if statuts:
-                apprentissage.setdefault("statuts_par_type", {}).update(statuts)
+                # Jamais appliquer "silence" — max autorisé = "prudent"
+                statuts_filtres = {k: ("prudent" if v == "silence" else v) for k, v in statuts.items()}
+                apprentissage.setdefault("statuts_par_type", {}).update(statuts_filtres)
                 _sauvegarder_json(APPRENTISSAGE_FILE, apprentissage)
-                resume = ", ".join(f"{k}={v}" for k, v in statuts.items())
+                resume = ", ".join(f"{k}={v}" for k, v in statuts_filtres.items())
                 logger.info(f"[CALIBRATION] Statuts IA mis a jour: {resume}")
         except Exception as e:
             logger.warning(f"[CALIBRATION] Erreur fetch: {e}")
