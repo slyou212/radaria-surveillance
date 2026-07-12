@@ -329,6 +329,21 @@ def init_db():
         nb_cameras   INTEGER DEFAULT 0
     )
     """)
+    # Table chat agent — dialogue backoffice ↔ gardien PC
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS agent_chat (
+        id                  SERIAL PRIMARY KEY,
+        license_key         TEXT NOT NULL,
+        role                TEXT NOT NULL,
+        message             TEXT NOT NULL,
+        type                TEXT DEFAULT 'message',
+        approbation_requise BOOLEAN DEFAULT FALSE,
+        approuve            BOOLEAN DEFAULT NULL,
+        repair_id           INTEGER DEFAULT NULL,
+        created_at          TIMESTAMP DEFAULT NOW(),
+        lu                  BOOLEAN DEFAULT FALSE
+    )
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -745,22 +760,40 @@ def client_detail(client_id):
     installation = cur.fetchone()
     cur.execute("SELECT * FROM alertes_centrales WHERE client_id=%s ORDER BY date DESC, heure DESC LIMIT 50", (client_id,))
     alertes_raw = cur.fetchall()
-    # Stats feedback
-    VOL_VALS  = {"ok","vol","vrai","oui","1","true","positif"}
-    FAUX_VALS = {"faux","non","0","false","negatif"}
+    # Stats feedback — valeurs réelles stockées par l'app : 'confirme' / 'faux_positif'
     fb_vol = fb_faux = fb_aucun = 0
     alertes = []
     for a in alertes_raw:
         ad = dict(a)
         fb = (ad.get("feedback") or "").lower().strip()
-        if fb in VOL_VALS:
+        if fb == "confirme":
             ad["_fb_type"] = "vol"; fb_vol += 1
-        elif fb in FAUX_VALS:
+        elif fb == "faux_positif":
             ad["_fb_type"] = "faux"; fb_faux += 1
         else:
             ad["_fb_type"] = "aucun"; fb_aucun += 1
         alertes.append(ad)
     feedback_stats = {"vol": fb_vol, "faux": fb_faux, "aucun": fb_aucun, "total": len(alertes)}
+    # Stats globales sur TOUTES les alertes (pas seulement les 50 affichées)
+    cur.execute("""
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN feedback='confirme'     THEN 1 ELSE 0 END) as confirmes,
+               SUM(CASE WHEN feedback='faux_positif' THEN 1 ELSE 0 END) as faux_positifs,
+               SUM(CASE WHEN feedback IS NULL OR feedback='' THEN 1 ELSE 0 END) as sans_retour
+        FROM alertes_centrales WHERE client_id=%s
+    """, (client_id,))
+    _sg = cur.fetchone()
+    stats_globales = dict(_sg) if _sg else {"total":0,"confirmes":0,"faux_positifs":0,"sans_retour":0}
+    # Breakdown par type de geste
+    cur.execute("""
+        SELECT type,
+               COUNT(*) as total,
+               SUM(CASE WHEN feedback='confirme'     THEN 1 ELSE 0 END) as confirmes,
+               SUM(CASE WHEN feedback='faux_positif' THEN 1 ELSE 0 END) as faux_positifs
+        FROM alertes_centrales WHERE client_id=%s
+        GROUP BY type ORDER BY total DESC
+    """, (client_id,))
+    stats_par_geste = [dict(r) for r in cur.fetchall()]
     cur.execute("SELECT * FROM interventions WHERE client_id=%s ORDER BY date DESC", (client_id,))
     interventions = cur.fetchall()
     cur.execute("SELECT * FROM factures WHERE client_id=%s ORDER BY annee DESC, mois DESC", (client_id,))
@@ -791,7 +824,8 @@ def client_detail(client_id):
     return render_template("client_detail.html", client=client, installation=installation,
                            alertes=alertes, interventions=interventions, factures=factures,
                            snapshots=snapshots, contrats=contrats, sinistres=sinistres,
-                           feedback_stats=feedback_stats, client_id=client_id)
+                           feedback_stats=feedback_stats, stats_globales=stats_globales,
+                           stats_par_geste=stats_par_geste, client_id=client_id)
 
 @app.route("/client/<int:client_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -1938,7 +1972,213 @@ def pc_statut():
     return jsonify({"statut": client["statut"]})
 
 # =================================================================
+# AUTO-CALIBRATION IA
+# =================================================================
+@app.route("/api/calibration/<license_key>")
+def api_calibration(license_key):
+    """Retourne les statuts IA par geste (actif/prudent/silence) bases sur feedback 30j."""
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT id FROM clients WHERE license_key=%s", (license_key,))
+    client = cur.fetchone()
+    if not client:
+        cur.close(); conn.close()
+        return jsonify({"error": "licence inconnue"}), 403
+    client_id = client["id"]
+    from datetime import timedelta
+    date_30j = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    cur.execute("""
+        SELECT type,
+               COUNT(*) as total,
+               SUM(CASE WHEN feedback='confirme'     THEN 1 ELSE 0 END) as confirmes,
+               SUM(CASE WHEN feedback='faux_positif' THEN 1 ELSE 0 END) as faux_positifs
+        FROM alertes_centrales
+        WHERE client_id=%s AND date >= %s
+        GROUP BY type
+    """, (client_id, date_30j))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    statuts = {}
+    details = []
+    for row in rows:
+        r = dict(row)
+        geste = r["type"]
+        total_eval = (r["confirmes"] or 0) + (r["faux_positifs"] or 0)
+        if total_eval < 5:
+            statut = "actif"
+        else:
+            faux_rate = (r["faux_positifs"] or 0) / total_eval
+            if faux_rate >= 0.70:
+                statut = "silence"
+            elif faux_rate >= 0.45:
+                statut = "prudent"
+            else:
+                statut = "actif"
+        statuts[geste] = statut
+        details.append({
+            "type": geste,
+            "total": r["total"],
+            "confirmes": r["confirmes"] or 0,
+            "faux_positifs": r["faux_positifs"] or 0,
+            "total_evalues": total_eval,
+            "taux_faux": round((r["faux_positifs"] or 0) / total_eval * 100) if total_eval > 0 else 0,
+            "statut": statut,
+        })
+    return jsonify({
+        "client_id": client_id,
+        "periode": "30j",
+        "statuts": statuts,
+        "details": details,
+        "generated_at": datetime.now().isoformat(),
+    })
+
+# =================================================================
+# UPDATE PC MAGASIN — /api/update/surveillance/<license_key>
+# =================================================================
+@app.route("/api/update/surveillance/<license_key>")
+def api_update_surveillance(license_key):
+    """Sert la derniere version de surveillance.py aux PCs magasins authorises."""
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT id FROM clients WHERE license_key=%s", (license_key,))
+    client = cur.fetchone()
+    cur.close(); conn.close()
+    if not client:
+        return jsonify({"error": "licence inconnue"}), 403
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    surv_path = os.path.join(static_dir, "surveillance.py")
+    if not os.path.exists(surv_path):
+        return jsonify({"error": "pas de mise a jour disponible"}), 404
+    return send_from_directory(static_dir, "surveillance.py",
+                               as_attachment=True,
+                               download_name="surveillance.py",
+                               mimetype="text/x-python")
+
+# =================================================================
+# AGENT CHAT — Dialogue backoffice ↔ Gardien PC
+# =================================================================
+
+@app.route("/api/agent/chat/send", methods=["POST"])
+@login_required
+def api_agent_chat_send():
+    """Backoffice → Agent : envoyer un message ou instruction."""
+    data = request.form if request.form else (request.json or {})
+    lk  = (data.get("license_key") or "").strip()
+    msg = (data.get("message") or "").strip()
+    if not lk or not msg:
+        return jsonify({"ok": False, "error": "license_key et message requis"}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO agent_chat (license_key, role, message, type, lu)
+        VALUES (%s, 'user', %s, 'message', FALSE) RETURNING id
+    """, (lk, msg))
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True, "id": row["id"]})
+
+
+@app.route("/api/agent/chat/messages", methods=["GET"])
+def api_agent_chat_messages():
+    """Agent → Backoffice : récupérer les messages non lus de l'utilisateur."""
+    lk = request.args.get("license_key", "")
+    if not lk:
+        return jsonify([])
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        SELECT id, message, type, created_at FROM agent_chat
+        WHERE license_key=%s AND role='user' AND lu=FALSE
+        ORDER BY created_at
+    """, (lk,))
+    msgs = [dict(r) for r in cur.fetchall()]
+    ids  = [m["id"] for m in msgs]
+    if ids:
+        cur.execute("UPDATE agent_chat SET lu=TRUE WHERE id=ANY(%s)", (ids,))
+        conn.commit()
+    cur.close(); conn.close()
+    for m in msgs:
+        m["created_at"] = str(m["created_at"])[:16]
+    return jsonify(msgs)
+
+
+@app.route("/api/agent/chat/respond", methods=["POST"])
+def api_agent_chat_respond():
+    """Agent → Backoffice : envoyer une réponse ou demande d'approbation."""
+    data = request.json or {}
+    lk              = data.get("license_key", "")
+    msg             = data.get("message", "")
+    msg_type        = data.get("type", "message")
+    approbation     = bool(data.get("approbation_requise", False))
+    repair_id       = data.get("repair_id")
+    if not lk or not msg:
+        return jsonify({"ok": False}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO agent_chat (license_key, role, message, type, approbation_requise, repair_id)
+        VALUES (%s, 'agent', %s, %s, %s, %s) RETURNING id
+    """, (lk, msg, msg_type, approbation, repair_id))
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True, "id": row["id"]})
+
+
+@app.route("/api/agent/chat/approve/<int:msg_id>", methods=["POST"])
+@login_required
+def api_agent_chat_approve(msg_id):
+    """Backoffice → Agent : approuver ou refuser une réparation."""
+    data     = request.json or {}
+    decision = data.get("decision", "approve")
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        UPDATE agent_chat SET approuve=%s WHERE id=%s RETURNING id
+    """, (decision == "approve", msg_id))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return jsonify({"ok": False, "error": "message non trouvé"}), 404
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/agent/chat/approval_status", methods=["GET"])
+def api_agent_chat_approval_status():
+    """Agent → Backoffice : vérifier les approbations reçues."""
+    lk = request.args.get("license_key", "")
+    if not lk:
+        return jsonify([])
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        SELECT id, approuve, repair_id, type FROM agent_chat
+        WHERE license_key=%s AND role='agent' AND approbation_requise=TRUE
+              AND approuve IS NOT NULL
+        ORDER BY created_at DESC LIMIT 20
+    """, (lk,))
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify(rows)
+
+
+@app.route("/api/agent/chat/history", methods=["GET"])
+@login_required
+def api_agent_chat_history():
+    """Backoffice UI : historique du chat pour un agent."""
+    lk    = request.args.get("license_key", "")
+    limit = min(int(request.args.get("limit", 60)), 200)
+    if not lk:
+        return jsonify([])
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        SELECT id, role, message, type, approbation_requise, approuve, repair_id, created_at
+        FROM agent_chat WHERE license_key=%s
+        ORDER BY created_at DESC LIMIT %s
+    """, (lk, limit))
+    msgs = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    for m in msgs:
+        m["created_at"] = str(m["created_at"])[:16]
+    return jsonify(list(reversed(msgs)))
+
+
+# =================================================================
 # MAIN
 # =================================================================
 init_db()
 if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)

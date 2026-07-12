@@ -3,69 +3,92 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
+<meta http-equiv="refresh" content="3600">
 <title>RadarIA — Agents PC</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#07071a;color:#e0e0e0;font-family:'Segoe UI',Arial,sans-serif;min-height:100vh}
-.topbar{background:#0d0d2b;border-bottom:1px solid #1a1a3a;padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
-.topbar h1{font-size:17px;color:#7b8cde;font-weight:700;letter-spacing:.04em}
-.topbar .nav a{color:#555;text-decoration:none;margin-left:20px;font-size:13px}
-.topbar .nav a:hover{color:#7b8cde}
+body{background:#F5F6FA;color:#111827;font-family:'Segoe UI',Arial,sans-serif;min-height:100vh}
+.topbar{background:#FFFFFF;border-bottom:1px solid #E5E7EB;padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:17px;color:#3b4fd8;font-weight:700;letter-spacing:.04em}
+.topbar .nav a{color:#9CA3AF;text-decoration:none;margin-left:20px;font-size:13px}
+.topbar .nav a:hover{color:#3b4fd8}
 .content{max-width:1300px;margin:0 auto;padding:28px}
-.section-title{font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;margin-top:28px}
+.section-title{font-size:12px;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;margin-top:28px}
 
 /* Grid agents */
 .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:32px}
-.agent-card{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;padding:18px;position:relative}
-.agent-card.online {border-left:4px solid #4ade80}
-.agent-card.warn   {border-left:4px solid #fbbf24}
-.agent-card.offline{border-left:4px solid #f87171}
-.agent-name{font-weight:700;font-size:15px;color:#e0e0e0;margin-bottom:2px}
-.agent-host{font-size:11px;color:#555;margin-bottom:12px;font-family:monospace}
+.agent-card{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;padding:18px;position:relative;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
+.agent-card.online {border-left:4px solid #16a34a}
+.agent-card.warn   {border-left:4px solid #D97706}
+.agent-card.offline{border-left:4px solid #DC2626}
+.agent-name{font-weight:700;font-size:15px;color:#111827;margin-bottom:2px}
+.agent-host{font-size:11px;color:#9CA3AF;margin-bottom:12px;font-family:monospace}
 .agent-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.stat{background:#07071a;border-radius:8px;padding:8px 10px}
-.stat-label{font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.04em}
-.stat-value{font-size:14px;font-weight:600;color:#e0e0e0;margin-top:2px}
-.stat-value.ok {color:#4ade80}
-.stat-value.ko {color:#f87171}
-.stat-value.warn{color:#fbbf24}
+.stat{background:#F9FAFB;border:1px solid #F3F4F6;border-radius:8px;padding:8px 10px}
+.stat-label{font-size:10px;color:#9CA3AF;text-transform:uppercase;letter-spacing:.04em}
+.stat-value{font-size:14px;font-weight:600;color:#111827;margin-top:2px}
+.stat-value.ok {color:#16a34a}
+.stat-value.ko {color:#DC2626}
+.stat-value.warn{color:#D97706}
 .badge-statut{position:absolute;top:14px;right:14px;font-size:10px;padding:3px 10px;border-radius:10px;font-weight:700}
-.badge-statut.online {background:#1e3a1e;color:#4ade80}
-.badge-statut.warn   {background:#3a3000;color:#fbbf24}
-.badge-statut.offline{background:#3a1e1e;color:#f87171}
-.last-seen{font-size:11px;color:#444;margin-top:12px}
+.badge-statut.online {background:#F0FDF4;color:#16a34a;border:1px solid #BBF7D0}
+.badge-statut.warn   {background:#FFFBEB;color:#D97706;border:1px solid #FDE68A}
+.badge-statut.offline{background:#FEF2F2;color:#DC2626;border:1px solid #FECACA}
+.last-seen{font-size:11px;color:#9CA3AF;margin-top:12px}
 .btn-cmd{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
-.btn{font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #2a2a5a;background:#0d0d2b;color:#7b8cde;cursor:pointer}
-.btn:hover{background:#1a1a4a}
-.btn-danger{border-color:#4a1a1a;color:#f87171}
-.btn-danger:hover{background:#2a0a0a}
+.btn{font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #E5E7EB;background:#F3F4F6;color:#374151;cursor:pointer}
+.btn:hover{background:#E5E7EB}
+.btn-danger{border-color:#FECACA;color:#DC2626;background:#FEF2F2}
+.btn-danger:hover{background:#FEE2E2}
 
 /* Incidents */
-.incidents-list{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;overflow:hidden}
-.incident-row{padding:14px 18px;border-bottom:1px solid #0a0a1a;display:flex;gap:14px;align-items:flex-start}
+.incidents-list{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden}
+.incident-row{padding:14px 18px;border-bottom:1px solid #F3F4F6;display:flex;gap:14px;align-items:flex-start}
 .incident-row:last-child{border-bottom:none}
 .inc-priorite{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;white-space:nowrap;margin-top:2px}
-.inc-priorite.critique{background:#4a0a0a;color:#f87171}
-.inc-priorite.haute   {background:#3a1a0a;color:#fb923c}
-.inc-priorite.moyenne {background:#3a3000;color:#fbbf24}
-.inc-priorite.basse   {background:#1a2a1a;color:#86efac}
+.inc-priorite.critique{background:#FEF2F2;color:#DC2626;border:1px solid #FECACA}
+.inc-priorite.haute   {background:#FFF7ED;color:#EA580C;border:1px solid #FED7AA}
+.inc-priorite.moyenne {background:#FFFBEB;color:#D97706;border:1px solid #FDE68A}
+.inc-priorite.basse   {background:#F0FDF4;color:#16a34a;border:1px solid #BBF7D0}
 .inc-body{flex:1}
-.inc-magasin{font-size:12px;color:#7b8cde;font-weight:600;margin-bottom:3px}
-.inc-desc{font-size:13px;color:#ccc}
-.inc-fix{font-size:11px;color:#555;margin-top:4px}
-.inc-date{font-size:10px;color:#444;white-space:nowrap}
-.empty{text-align:center;padding:40px;color:#333;font-size:14px}
+.inc-magasin{font-size:12px;color:#3b4fd8;font-weight:600;margin-bottom:3px}
+.inc-desc{font-size:13px;color:#374151}
+.inc-fix{font-size:11px;color:#9CA3AF;margin-top:4px}
+.inc-date{font-size:10px;color:#9CA3AF;white-space:nowrap}
+.empty{text-align:center;padding:40px;color:#9CA3AF;font-size:14px}
 
 /* Envoyer commande */
-.cmd-panel{background:#0d0d2b;border:1px solid #1a1a3a;border-radius:12px;padding:20px;margin-top:28px}
-.cmd-panel h3{font-size:13px;color:#7b8cde;margin-bottom:14px}
+.cmd-panel{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;padding:20px;margin-top:28px}
+.cmd-panel h3{font-size:13px;color:#3b4fd8;margin-bottom:14px;font-weight:700}
 .cmd-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.cmd-form select, .cmd-form input{background:#07071a;border:1px solid #1a1a3a;color:#e0e0e0;padding:8px 12px;border-radius:8px;font-size:13px}
+.cmd-form select, .cmd-form input{background:#FFFFFF;border:1px solid #D1D5DB;color:#111827;padding:8px 12px;border-radius:8px;font-size:13px}
 .cmd-form select{min-width:200px}
-.btn-envoyer{background:#1a1a4a;border:1px solid #3a3a7a;color:#7b8cde;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
-.btn-envoyer:hover{background:#2a2a6a}
-.counter{font-size:11px;color:#444;text-align:right;margin-top:8px}
+.btn-envoyer{background:#3b4fd8;border:none;color:#fff;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
+.btn-envoyer:hover{background:#2d3cb5}
+.counter{font-size:11px;color:#9CA3AF;text-align:right;margin-top:8px}
+
+/* Chat agent */
+.chat-panel{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;margin-top:28px;overflow:hidden}
+.chat-header{background:#F9FAFB;border-bottom:1px solid #E5E7EB;padding:14px 20px;display:flex;align-items:center;justify-content:space-between}
+.chat-header h3{font-size:13px;color:#3b4fd8;font-weight:700}
+.chat-agent-sel{background:#FFFFFF;border:1px solid #D1D5DB;color:#111827;padding:6px 10px;border-radius:8px;font-size:12px}
+.chat-messages{height:320px;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.chat-msg{max-width:80%;padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.5;white-space:pre-wrap}
+.chat-msg.user{align-self:flex-end;background:#3b4fd8;color:#fff;border-bottom-right-radius:3px}
+.chat-msg.agent{align-self:flex-start;background:#F3F4F6;color:#111827;border-bottom-left-radius:3px}
+.chat-msg.agent.diagnostic{background:#EFF6FF;border:1px solid #BFDBFE}
+.chat-msg.agent.repair_request{background:#FFFBEB;border:1px solid #FDE68A}
+.chat-msg.agent.repair_result{background:#F0FDF4;border:1px solid #BBF7D0}
+.chat-msg-meta{font-size:10px;color:#9CA3AF;margin-top:4px}
+.chat-approve-btns{display:flex;gap:8px;margin-top:8px}
+.btn-approve{background:#16a34a;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600}
+.btn-refuse{background:#DC2626;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer}
+.btn-approve:disabled,.btn-refuse:disabled{opacity:.5;cursor:default}
+.chat-input-row{border-top:1px solid #E5E7EB;padding:12px 16px;display:flex;gap:8px}
+.chat-input{flex:1;border:1px solid #D1D5DB;border-radius:8px;padding:8px 12px;font-size:13px;color:#111827;background:#FFFFFF}
+.btn-chat-send{background:#3b4fd8;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
+.btn-chat-send:hover{background:#2d3cb5}
+.chat-empty{text-align:center;color:#9CA3AF;font-size:13px;padding:40px 0}
 </style>
 </head>
 <body>
@@ -132,7 +155,7 @@ body{background:#07071a;color:#e0e0e0;font-family:'Segoe UI',Arial,sans-serif;mi
   {% endif %}
 
   <!-- Incidents -->
-  <div class="section-title">Incidents récents {% if nb_incidents > 0 %}<span style="background:#3a1e1e;color:#f87171;padding:2px 8px;border-radius:8px;font-size:11px">{{ nb_incidents }} non lus</span>{% endif %}</div>
+  <div class="section-title">Incidents récents {% if nb_incidents > 0 %}<span style="background:#FEF2F2;color:#DC2626;padding:2px 8px;border-radius:8px;font-size:11px;border:1px solid #FECACA">{{ nb_incidents }} non lus</span>{% endif %}</div>
   <div class="incidents-list">
     {% if incidents %}
       {% for i in incidents %}
@@ -144,7 +167,7 @@ body{background:#07071a;color:#e0e0e0;font-family:'Segoe UI',Arial,sans-serif;mi
           <div class="inc-magasin">{{ i.nom_magasin or i.license_key[:8]+'...' }} — {{ i.hostname }}</div>
           <div class="inc-desc">{{ i.description }}</div>
           {% if i.diagnostic %}<div class="inc-fix">🤖 {{ i.diagnostic }}</div>{% endif %}
-          {% if i.fix_applique %}<div class="inc-fix" style="color:#4ade80">✓ {{ i.fix_applique }}</div>{% endif %}
+          {% if i.fix_applique %}<div class="inc-fix" style="color:#16a34a">✓ {{ i.fix_applique }}</div>{% endif %}
         </div>
         <div class="inc-date">{{ i.created_at_str }}</div>
       </div>
@@ -164,35 +187,222 @@ body{background:#07071a;color:#e0e0e0;font-family:'Segoe UI',Arial,sans-serif;mi
         <option value="{{ c.license_key }}">{{ c.nom_magasin }}</option>
         {% endfor %}
       </select>
-      <select name="action" required>
+      <select name="action" id="selectAction" required onchange="toggleCodeZone(this.value)">
         <option value="redemarrer_surveillance">↺ Relancer surveillance</option>
         <option value="diagnostic">🔍 Diagnostic complet</option>
         <option value="mettre_a_jour">⬆ Mettre à jour surveillance.py</option>
+        <option value="fix_code">🔧 Fix code Python (exec)</option>
       </select>
       <button type="submit" class="btn-envoyer">Envoyer</button>
     </form>
+    <div id="zoneCode" style="display:none;margin-top:10px">
+      <label style="font-size:12px;color:#6B7280;font-weight:600">Code Python à exécuter sur le PC :</label>
+      <textarea id="txtCodePython" rows="10" style="width:100%;margin-top:6px;font-family:monospace;font-size:12px;background:#F9FAFB;border:1px solid #D1D5DB;border-radius:8px;padding:10px;color:#111827" placeholder="# Code Python..."></textarea>
+    </div>
+
+    <!-- Déploiement global -->
+    <div style="margin-top:16px;padding-top:16px;border-top:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:12px;color:#111827;font-weight:600">⬆ Déployer sur tous les clients</div>
+        <div style="font-size:11px;color:#9CA3AF;margin-top:2px">Envoie "mettre_a_jour" à tous les agents EN LIGNE — redémarre automatiquement</div>
+      </div>
+      <button onclick="deployerTous()" style="background:#F0FDF4;border:1px solid #BBF7D0;color:#16a34a;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600">
+        ⬆ Déployer partout
+      </button>
+    </div>
   </div>
+
+  <!-- Chat Agent IA -->
+  {% if agents %}
+  <div class="chat-panel">
+    <div class="chat-header">
+      <h3>💬 Chat avec le Gardien IA</h3>
+      <select class="chat-agent-sel" id="chatAgentSel" onchange="chargerChat()">
+        {% for a in agents %}
+        <option value="{{ a.license_key }}">{{ a.nom_magasin or a.hostname }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-empty">Sélectionnez un agent pour voir la conversation</div>
+    </div>
+    <div class="chat-input-row">
+      <input class="chat-input" id="chatInput" type="text"
+             placeholder="Ex : vérifier tout, relancer surveillance, réparer…"
+             onkeydown="if(event.key==='Enter') envoyerChat()">
+      <button class="btn-chat-send" onclick="envoyerChat()">Envoyer</button>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="counter">Actualisation automatique toutes les 30 secondes</div>
 </div>
 
 <script>
+function showToast(msg, ok) {
+  let t = document.getElementById('_toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_toast';
+    t.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1E293B;color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.3);transition:opacity .3s';
+    document.body.appendChild(t);
+  }
+  t.style.background = ok ? '#16a34a' : '#dc2626';
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+}
+
 function envoyerCmd(lk, action) {
-  if (!confirm('Envoyer "' + action + '" au Gardien ?')) return;
   const fd = new FormData();
   fd.append('license_key', lk);
   fd.append('action', action);
+  console.log('[envoyerCmd] lk='+lk+' action='+action);
   fetch('/api/agent/commande/envoyer', {method:'POST', body:fd})
     .then(r=>r.json())
-    .then(d=>alert(d.message || (d.ok ? 'Commande envoyée' : 'Erreur')));
+    .then(d=>{ console.log('[envoyerCmd] resp='+JSON.stringify(d)); showToast(d.message || (d.ok ? 'Commande envoyée' : 'Erreur'), d.ok); });
 }
+
+function toggleCodeZone(action) {
+  document.getElementById('zoneCode').style.display = (action === 'fix_code') ? 'block' : 'none';
+}
+
 document.getElementById('formCmd').addEventListener('submit', function(e){
   e.preventDefault();
   const fd = new FormData(this);
+  // Fallback: si FormData ne capture pas la valeur CDP, lire .value directement
+  const lkSelect = this.querySelector('[name="license_key"]');
+  const actionSelect = this.querySelector('[name="action"]');
+  let lk = fd.get('license_key') || lkSelect.value;
+  let action = fd.get('action') || actionSelect.value;
+  console.log('[formCmd] lk='+lk+' action='+action+' fd_lk='+fd.get('license_key'));
+  if (!lk || lk === '') { showToast('Choisir un client', false); return; }
+  if (action === 'fix_code') {
+    const code = document.getElementById('txtCodePython').value.trim();
+    if (!code) { showToast('Veuillez coller le code Python à exécuter.', false); return; }
+    fd.set('license_key', lk);
+    fd.set('action', action);
+    fd.set('parametres', JSON.stringify({code: code}));
+  } else {
+    fd.set('license_key', lk);
+    fd.set('action', action);
+  }
+  console.log('[formCmd] sending lk='+fd.get('license_key')+' action='+fd.get('action'));
   fetch('/api/agent/commande/envoyer', {method:'POST', body:fd})
     .then(r=>r.json())
-    .then(d=>alert(d.message || (d.ok ? 'Commande envoyée' : 'Erreur')));
+    .then(d=>{ console.log('[formCmd] resp='+JSON.stringify(d)); showToast(d.message || (d.ok ? 'Commande envoyée' : 'Erreur'), d.ok); })
+    .catch(err=>{ console.error('[formCmd] err='+err); showToast('Erreur réseau', false); });
 });
+
+// ─── CHAT AGENT ────────────────────────────────────────────────────────────
+let chatLk = '';
+let chatPollTimer = null;
+
+function chargerChat() {
+  chatLk = document.getElementById('chatAgentSel').value;
+  if (!chatLk) return;
+  clearInterval(chatPollTimer);
+  fetchHistorique();
+  chatPollTimer = setInterval(fetchHistorique, 5000);
+}
+
+function fetchHistorique() {
+  if (!chatLk) return;
+  fetch('/api/agent/chat/history?license_key=' + encodeURIComponent(chatLk) + '&limit=60')
+    .then(r => r.json())
+    .then(msgs => afficherMessages(msgs))
+    .catch(() => {});
+}
+
+function afficherMessages(msgs) {
+  const box = document.getElementById('chatMessages');
+  if (!msgs || !msgs.length) {
+    box.innerHTML = '<div class="chat-empty">Aucun message — écrivez pour commencer</div>';
+    return;
+  }
+  const wasAtBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 30;
+  box.innerHTML = msgs.map(m => {
+    const role = m.role;
+    const typeClass = m.type !== 'message' ? ' ' + m.type : '';
+    let html = `<div>
+      <div class="chat-msg ${role}${typeClass}">${escHtml(m.message)}</div>
+      <div class="chat-msg-meta" style="text-align:${role==='user'?'right':'left'}">${m.created_at}</div>`;
+    if (m.approbation_requise) {
+      const done = m.approuve !== null && m.approuve !== undefined;
+      const label = m.approuve === true ? '✅ Approuvé' : (m.approuve === false ? '❌ Refusé' : '');
+      if (done) {
+        html += `<div class="chat-msg-meta" style="color:${m.approuve?'#16a34a':'#DC2626'};font-weight:600">${label}</div>`;
+      } else {
+        html += `<div class="chat-approve-btns">
+          <button class="btn-approve" onclick="approuver(${m.id},'approve',this)">✅ Approuver</button>
+          <button class="btn-refuse" onclick="approuver(${m.id},'refuse',this)">❌ Refuser</button>
+        </div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }).join('');
+  if (wasAtBottom) box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(t) {
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+function envoyerChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg || !chatLk) return;
+  input.value = '';
+  const fd = new FormData();
+  fd.append('license_key', chatLk);
+  fd.append('message', msg);
+  fetch('/api/agent/chat/send', {method:'POST', body:fd})
+    .then(r => r.json())
+    .then(d => { if(d.ok) fetchHistorique(); else showToast('Erreur envoi', false); })
+    .catch(() => showToast('Erreur réseau', false));
+}
+
+function approuver(msgId, decision, btn) {
+  btn.disabled = true;
+  btn.parentElement.querySelectorAll('button').forEach(b => b.disabled = true);
+  fetch('/api/agent/chat/approve/' + msgId, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({decision})
+  })
+  .then(r => r.json())
+  .then(d => {
+    showToast(decision === 'approve' ? '✅ Réparation approuvée — le Gardien va agir' : '❌ Refusé', d.ok);
+    fetchHistorique();
+  });
+}
+
+// Démarrer le chat sur le premier agent au chargement
+window.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('chatAgentSel');
+  if (sel && sel.value) chargerChat();
+});
+
+function deployerTous() {
+  const agents = {{ agents | tojson }};
+  const enligne = agents.filter(a => a.statut_visuel === 'online');
+  if (!enligne.length) { showToast('Aucun agent en ligne.', false); return; }
+  let ok = 0, ko = 0;
+  const promesses = enligne.map(a => {
+    const fd = new FormData();
+    fd.append('license_key', a.license_key);
+    fd.append('action', 'mettre_a_jour');
+    return fetch('/api/agent/commande/envoyer', {method:'POST', body:fd})
+      .then(r=>r.json())
+      .then(d=>{ if(d.ok) ok++; else ko++; })
+      .catch(()=>ko++);
+  });
+  Promise.all(promesses).then(()=>{
+    showToast('Déploiement lancé : ' + ok + ' succès, ' + ko + ' erreur(s).', ok > 0);
+  });
+}
 </script>
 </body>
 </html>

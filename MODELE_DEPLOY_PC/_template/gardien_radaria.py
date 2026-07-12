@@ -42,9 +42,11 @@ CONFIG_SURV  = SURV_DIR / "config.json"
 CONFIG_GARD  = BASE / "gardien_config.json"
 CONNAISSANCE = BASE / "base_connaissance.json"
 JOURNAL      = BASE / "journal_gardien.json"
-BRIEFING     = BASE / "BRIEFING_CLAUDE.md"
-HANDOVER_OUT = BASE / "HANDOVER_PC_principal.md"
-BACKOFFICE   = "https://backoffice.radaria.fr"
+BRIEFING          = BASE / "BRIEFING_CLAUDE.md"
+HANDOVER_OUT      = BASE / "HANDOVER_PC_principal.md"
+PENDING_REPAIRS   = BASE / "pending_repairs.json"
+LAST_DIAGNOSTIC   = BASE / "last_diagnostic.json"
+BACKOFFICE        = "https://backoffice.radaria.fr"
 GITHUB_SURV_URL = "https://raw.githubusercontent.com/slyou212/radaria-backoffice/main/surveillance.py"
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
@@ -437,6 +439,174 @@ def recuperer_commandes():
         return data
     return []
 
+# ══════════════════════════════════════════════════════════════════════════════
+#   CHAT BACKOFFICE — Dialogue avec l'utilisateur
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_lk_bo():
+    """Retourne (license_key, backoffice_url) depuis la config."""
+    cfg = charger_json(CONFIG_SURV, {})
+    lk  = cfg.get("license_key","") or charger_json(CONFIG_GARD,{}).get("license_key","")
+    bo  = cfg.get("backoffice_url", BACKOFFICE)
+    return lk, bo
+
+def recuperer_messages_chat():
+    """Récupère les nouveaux messages utilisateur non lus depuis le backoffice."""
+    lk, bo = _get_lk_bo()
+    if not lk: return []
+    data, code = http_get(f"{bo}/api/agent/chat/messages?license_key={lk}")
+    return data if code == 200 and isinstance(data, list) else []
+
+def envoyer_message_chat(message: str, msg_type: str = "message",
+                          approbation_requise: bool = False, repair_id=None):
+    """Envoie une réponse ou demande d'approbation au backoffice."""
+    lk, bo = _get_lk_bo()
+    if not lk: return None
+    payload = {
+        "license_key": lk,
+        "message": message,
+        "type": msg_type,
+        "approbation_requise": approbation_requise,
+        "repair_id": repair_id,
+    }
+    resp, code = http_post(f"{bo}/api/agent/chat/respond", payload)
+    if code == 200:
+        return resp.get("id")
+    return None
+
+def verifier_approbations():
+    """Vérifie les approbations accordées par l'utilisateur."""
+    lk, bo = _get_lk_bo()
+    if not lk: return []
+    data, code = http_get(f"{bo}/api/agent/chat/approval_status?license_key={lk}")
+    return data if code == 200 and isinstance(data, list) else []
+
+def traiter_message_chat(msg: dict):
+    """Interprète un message utilisateur et répond en conséquence."""
+    texte = msg.get("message","").lower().strip()
+    log.info(f"[CHAT] Message utilisateur : {texte[:80]}")
+
+    # ── Diagnostic / vérification ──────────────────────────────────────────
+    if any(kw in texte for kw in ["verif", "diagnos", "état", "etat", "check", "tout", "status"]):
+        etat = collecter_etat_complet()
+        sauver_json(LAST_DIAGNOSTIC, etat)
+        surv    = "✅ Active" if etat["surveillance_active"] else "❌ Arrêtée"
+        cam_ok  = sum(1 for c in etat.get("cameras",[]) if c.get("ok"))
+        cam_tot = len(etat.get("cameras",[]))
+        disk    = etat.get("disk",{})
+        bo_info = etat.get("backoffice",{})
+        net     = etat.get("reseau",{})
+
+        rapport = (
+            f"🤖 Rapport — {etat['date']}\n\n"
+            f"📡 Surveillance : {surv}\n"
+            f"📷 Caméras : {cam_ok}/{cam_tot} opérationnelles\n"
+            f"💾 Disque : {disk.get('libre_gb','?')} Go libres ({disk.get('pct_utilise','?')}% utilisé)\n"
+            f"🌐 Réseau : {'✅ Connecté' if net.get('ok') else '❌ Hors ligne'} ({net.get('ip_locale','?')})\n"
+            f"🏠 Backoffice : {'✅ OK' if bo_info.get('ok') else '❌ Inaccessible'} ({bo_info.get('ms','?')} ms)"
+        )
+        problemes = []
+        if not etat["surveillance_active"]: problemes.append("surveillance arrêtée")
+        if cam_ok < cam_tot: problemes.append(f"{cam_tot-cam_ok} caméra(s) hors ligne")
+        if disk.get("pct_utilise",0) > 85: problemes.append("disque presque plein")
+
+        if problemes:
+            rapport += f"\n\n⚠️ Problèmes : {', '.join(problemes)}\nRépondez 'réparer' pour que je corrige."
+        else:
+            rapport += "\n\n✅ Tout fonctionne correctement."
+
+        envoyer_message_chat(rapport, "diagnostic")
+
+    # ── Réparer / corriger ─────────────────────────────────────────────────
+    elif any(kw in texte for kw in ["répare", "repare", "repair", "corrige", "fix", "résoudre"]):
+        etat = charger_json(LAST_DIAGNOSTIC, None) or collecter_etat_complet()
+        sauver_json(LAST_DIAGNOSTIC, etat)
+        actions = []
+        if not etat.get("surveillance_active"): actions.append("relancer_surveillance")
+        if etat.get("disk",{}).get("pct_utilise",0) > 85: actions.append("nettoyer_disk")
+
+        if not actions:
+            envoyer_message_chat("✅ Aucun problème à corriger — le système fonctionne bien.", "message")
+        else:
+            liste = "\n".join(f"• {a.replace('_',' ')}" for a in actions)
+            msg_id = envoyer_message_chat(
+                f"🔧 Je propose les réparations suivantes :\n{liste}\n\n"
+                f"Cliquez ✅ Approuver pour autoriser.",
+                "repair_request", approbation_requise=True
+            )
+            pending = charger_json(PENDING_REPAIRS, [])
+            pending.append({"id": msg_id, "actions": actions, "ts": maintenant()})
+            sauver_json(PENDING_REPAIRS, pending)
+
+    # ── Relancer surveillance ─────────────────────────────────────────────
+    elif any(kw in texte for kw in ["relance", "restart", "redémarre", "redemarr"]):
+        msg_id = envoyer_message_chat(
+            "🔄 Souhaitez-vous que je relance la surveillance maintenant ?\n\nCliquez ✅ Approuver pour confirmer.",
+            "repair_request", approbation_requise=True
+        )
+        pending = charger_json(PENDING_REPAIRS, [])
+        pending.append({"id": msg_id, "actions": ["relancer_surveillance"], "ts": maintenant()})
+        sauver_json(PENDING_REPAIRS, pending)
+
+    # ── Nettoyer disque ──────────────────────────────────────────────────
+    elif any(kw in texte for kw in ["disk", "disque", "nettoy", "clean", "espace"]):
+        msg_id = envoyer_message_chat(
+            "🧹 Je peux supprimer les anciens fichiers (snapshots/vidéos — garde les 100 plus récents).\n\nCliquez ✅ Approuver pour autoriser.",
+            "repair_request", approbation_requise=True
+        )
+        pending = charger_json(PENDING_REPAIRS, [])
+        pending.append({"id": msg_id, "actions": ["nettoyer_disk"], "ts": maintenant()})
+        sauver_json(PENDING_REPAIRS, pending)
+
+    # ── Aide / commandes inconnues ────────────────────────────────────────
+    else:
+        envoyer_message_chat(
+            "🤖 Gardien RadarIA — commandes disponibles :\n"
+            "• 'vérifier tout' — diagnostic complet du système\n"
+            "• 'réparer' — corriger les problèmes détectés\n"
+            "• 'relancer surveillance' — redémarrer surveillance.py\n"
+            "• 'nettoyer disque' — libérer de l'espace disque\n\n"
+            "Je surveille automatiquement et vous alerterai si quelque chose ne va pas.",
+            "message"
+        )
+
+def executer_reparations_approuvees():
+    """Vérifie les approbations reçues et exécute les réparations autorisées."""
+    pending = charger_json(PENDING_REPAIRS, [])
+    if not pending: return
+
+    approuves = verifier_approbations()
+    # Construire set des id approuvés
+    approuve_ids = {a["id"] for a in approuves if a.get("approuve") is True}
+    refuse_ids   = {a["id"] for a in approuves if a.get("approuve") is False}
+
+    remaining = []
+    for repair in pending:
+        rid = repair.get("id")
+        if rid in approuve_ids:
+            # Exécuter
+            resultats = []
+            for action in repair.get("actions", []):
+                if action == "relancer_surveillance":
+                    ok, msg_r = fix_relancer_surveillance()
+                    resultats.append(f"{'✅' if ok else '❌'} Surveillance : {msg_r}")
+                elif action == "nettoyer_disk":
+                    ok, msg_r = fix_liberer_disk()
+                    resultats.append(f"{'✅' if ok else '❌'} Disque : {msg_r}")
+            texte_resultat = "\n".join(resultats) or "✅ Réparations terminées."
+            envoyer_message_chat(
+                f"🔧 Réparations effectuées :\n{texte_resultat}",
+                "repair_result", repair_id=rid
+            )
+            journaliser("repair", "Réparations approuvées exécutées", texte_resultat, "info")
+        elif rid in refuse_ids:
+            envoyer_message_chat("❌ Réparation annulée par l'utilisateur.", "message", repair_id=rid)
+        else:
+            remaining.append(repair)  # toujours en attente
+
+    sauver_json(PENDING_REPAIRS, remaining)
+
+
 def executer_commande(cmd: dict):
     action = cmd.get("action", "")
     log.info(f"[COMMANDE] Recue depuis backoffice : {action}")
@@ -562,6 +732,37 @@ def cycle_surveillance():
 
     # ── 7. Heartbeat status ──────────────────────────────────────────────────
     envoyer_status(etat)
+
+    # ── 8. Messages chat utilisateur ──────────────────────────────────────────
+    msgs_chat = recuperer_messages_chat()
+    for msg in msgs_chat:
+        try:
+            traiter_message_chat(msg)
+        except Exception as e:
+            log.error(f"[CHAT] Erreur traitement message : {e}")
+
+    # ── 9. Réparations approuvées ─────────────────────────────────────────────
+    try:
+        executer_reparations_approuvees()
+    except Exception as e:
+        log.error(f"[CHAT] Erreur réparations approuvées : {e}")
+
+    # ── 10. Alertes proactives via chat ───────────────────────────────────────
+    # Si problème critique détecté → demande d'approbation automatique via chat
+    if not etat["surveillance_active"]:
+        # Vérifier si une repair_request est déjà en attente
+        pending = charger_json(PENDING_REPAIRS, [])
+        has_surv = any("relancer_surveillance" in r.get("actions",[]) for r in pending)
+        if not has_surv:
+            msg_id = envoyer_message_chat(
+                "🚨 Alerte automatique : la surveillance est arrêtée !\n"
+                "Dois-je la relancer ? Cliquez ✅ Approuver pour confirmer.",
+                "repair_request", approbation_requise=True
+            )
+            if msg_id:
+                pending.append({"id": msg_id, "actions": ["relancer_surveillance"], "ts": maintenant()})
+                sauver_json(PENDING_REPAIRS, pending)
+
     log.info(f"Cycle termine. Surveillance={'OK' if etat['surveillance_active'] else 'KO'}, "
              f"Cameras={sum(1 for c in etat.get('cameras',[]) if c.get('ok'))}/{len(etat.get('cameras',[]))}")
 
